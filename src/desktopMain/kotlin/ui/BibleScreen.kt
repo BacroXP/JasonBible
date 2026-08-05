@@ -170,8 +170,13 @@ fun BibleScreen(
         val incoming = initialReference
         if (incoming != null) {
             val matchingBook = books.find { it.name == incoming.book }
-            selectedBookNumber = matchingBook?.book
-            testament = if ((matchingBook?.book ?: 1) <= 39) {
+            // Unknown book names (e.g. a stale scaffold like `$Book`, or a
+            // book-only line that doesn't resolve) are a no-op — don't
+            // reset the pane to the book picker, just leave the current
+            // view alone.
+            if (matchingBook == null) return@LaunchedEffect
+            selectedBookNumber = matchingBook.book
+            testament = if (matchingBook.book <= 39) {
                 Testament.OLD
             } else {
                 Testament.NEW
@@ -567,10 +572,24 @@ fun BibleScreen(
                                             verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             chapter.verses.forEach { verse ->
-                                                val hoverHighlighted = hoveredBibleReference != null &&
-                                                    hoveredBibleReference.book == selectedBook.name &&
-                                                    hoveredBibleReference.chapter == chapter.chapter &&
-                                                    hoveredBibleReference.verse == verse.verse
+                                                // Hover highlight adapts to the reference's granularity: a
+                                                // verse ref highlights that single verse, a chapter ref
+                                                // highlights every verse in the chapter, a book ref
+                                                // highlights nothing (book-level hover has no verse
+                                                // target to tint).
+                                                val hovered = hoveredBibleReference
+                                                val hoverHighlighted = hovered != null &&
+                                                    hovered.book == selectedBook.name &&
+                                                    when {
+                                                        hovered.verse != null ->
+                                                            hovered.chapter == chapter.chapter &&
+                                                                hovered.verse == verse.verse
+
+                                                        hovered.chapter != null ->
+                                                            hovered.chapter == chapter.chapter
+
+                                                        else -> false
+                                                    }
                                                 VerseRow(
                                                     bookName = selectedBook.name,
                                                     bookNumber = selectedBook.book,

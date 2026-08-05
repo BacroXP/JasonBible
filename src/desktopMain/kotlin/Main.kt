@@ -5,6 +5,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.rememberWindowState
@@ -35,7 +36,13 @@ fun main() = application {
     Window(
         state = windowState,
         onCloseRequest = ::exitApplication,
-        title = "Bible App"
+        title = "Bible App",
+        // Window / taskbar icon on Linux & Windows. Loaded from the bundled
+        // `src/desktopMain/resources/icons/Icon.png` (512px, generated from
+        // the 1254px master via Icon-256.png / Icon-512.png siblings); on
+        // macOS the Dock icon is set via `iconFile` in build.gradle.kts
+        // instead (per-window icons are not supported there).
+        icon = painterResource("icons/Icon.png")
     ) {
 
         MaterialTheme(

@@ -1,6 +1,7 @@
 package data
 
 import model.BookBlock
+import model.ChapterReferenceBlock
 import model.HeadingBlock
 import model.ListBlock
 import model.NoteBlock
@@ -316,21 +317,28 @@ object NotesRepository {
         val verse = match.groupValues[3].toIntOrNull()
         val extra = match.groupValues[4].trim().ifBlank { null }
 
-        return if (chapter != null && verse != null) {
-            val reference = NoteReference(
-                noteTitle = noteTitle,
-                book = book,
-                chapter = chapter,
-                verse = verse,
-                label = extra
+        return when {
+            chapter != null && verse != null -> {
+                val reference = NoteReference(
+                    noteTitle = noteTitle,
+                    book = book,
+                    chapter = chapter,
+                    verse = verse,
+                    label = extra
+                )
+
+                ReferenceParseResult(
+                    block = VerseReferenceBlock(book, chapter, verse, extra),
+                    reference = reference
+                )
+            }
+
+            chapter != null -> ReferenceParseResult(
+                block = ChapterReferenceBlock(book, chapter),
+                reference = null
             )
 
-            ReferenceParseResult(
-                block = VerseReferenceBlock(book, chapter, verse, extra),
-                reference = reference
-            )
-        } else {
-            ReferenceParseResult(
+            else -> ReferenceParseResult(
                 block = BookBlock(book),
                 reference = null
             )
@@ -407,8 +415,10 @@ object NotesRepository {
     )
 
 
+    // Three granularities: `$Book`, `$Book$C` and `$Book$C$V` (the
+    // latter optionally followed by a free-text label).
     private val referenceRegex =
-        Regex("^\\\$([^\\\$]+)(?:\\\$(\\d+)\\\$(\\d+)(?:\\s+(.*))?)?$")
+        Regex("^\\\$([^\\\$]+)(?:\\\$(\\d+)(?:\\\$(\\d+)(?:\\s+(.*))?)?)?\\s*$")
 
     private val quoteRegex =
         Regex("^\"(.+?)\"(?:\\[#([0-9A-Fa-f]{3,8})])?\\s*(.*)$")

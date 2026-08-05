@@ -47,6 +47,11 @@ object RibbonIcons {
     // ---- Insert ---------------------------------------------------------
     val Reference: ImageVector by lazy { icon("Reference", "M3.9,12c0,-1.71 1.39,-3.1 3.1,-3.1h4V7H7c-2.76,0 -5,2.24 -5,5s2.24,5 5,5h4v-1.9H7c-1.71,0 -3.1,-1.39 -3.1,-3.1zM8,13h8v-2H8V13zM17,7h-4v1.9h4c1.71,0 3.1,1.39 3.1,3.1s-1.39,3.1 -3.1,3.1h-4V17h4c2.76,0 5,-2.24 5,-5s-2.24,-5 -5,-5z") }
     val Book: ImageVector by lazy { icon("Book", "M18,2H6C4.9,2 4,2.9 4,4v16c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V4C20,2.9 19.1,2 18,2zM6,4h5v8l-2.5,-1.5L6,12V4z") }
+
+    // Chapter reference — an open book with a page marker. Distinct from
+    // the Book icon (closed book) so the three granularity buttons are
+    // visually distinguishable.
+    val Chapter: ImageVector by lazy { icon("Chapter", "M20,3H6C4.9,3 4,3.9 4,5v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V5C22,3.9 21.1,3 20,3zM12,6h7v2h-7V6zM12,10h7v2h-7V10zM12,14h5v2h-5V14zM7,5c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1zM7,9c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1zM7,13c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1z") }
     val Date: ImageVector by lazy { icon("Date", "M9,11H7v2h2V11zM13,11h-2v2h2V11zM17,11h-2v2h2V11zM19,4h-1V2h-2v2H8V2H6v2H5C3.89,4 3.01,4.9 3.01,6L3,20c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V6C21,4.9 20.1,4 19,4zM19,20H5V9h14V20z") }
 
     // ---- Find / replace bar --------------------------------------------

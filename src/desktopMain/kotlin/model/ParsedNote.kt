@@ -36,6 +36,13 @@ data class BookBlock(
 ) : NoteBlock
 
 
+data class ChapterReferenceBlock(
+    val book: String,
+    val chapter: Int,
+    val extra: String? = null
+) : NoteBlock
+
+
 data class VerseReferenceBlock(
     val book: String,
     val chapter: Int,

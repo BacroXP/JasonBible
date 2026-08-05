@@ -63,6 +63,13 @@ compose.desktop {
 
             packageName = "BibleApp"
             packageVersion = "1.0.0"
+
+            // Application icons, one per platform. Kept in
+            // src/desktopMain/resources/icons/ and referenced explicitly
+            // so the .deb / .msi / .dmg installers all carry the icon.
+            linux.iconFile.set(project.file("src/desktopMain/resources/icons/Icon.png"))
+            windows.iconFile.set(project.file("src/desktopMain/resources/icons/icon.ico"))
+            macOS.iconFile.set(project.file("src/desktopMain/resources/icons/icon.icns"))
         }
     }
 }

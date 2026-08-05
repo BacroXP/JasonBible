@@ -56,6 +56,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -108,6 +109,7 @@ import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import data.BibleRepository
 import data.NotesRepository
 import data.SettingsManager
 import data.SoundEvent
@@ -151,7 +153,7 @@ private val ZOOM_MAX = SettingsManager.MAX_FONT_SCALE
 
 private val orderedListRegex = Regex("^\\d+\\.\\s+")
 private val referenceLineRegex =
-    Regex("^\\\$([^\\\$]+)\\\$(\\d+)\\\$(\\d+)(?:\\s+(.*))?\$")
+    Regex("^\\\$([^\\\$]+)(?:\\\$(\\d+)(?:\\\$(\\d+)(?:\\s+(.*))?)?)?\\s*$")
 private val coloredQuoteRegex =
     Regex("^\"(.+?)\"(?:\\[#([0-9A-Fa-f]{3,8})])?\\s*(.*)\$")
 
@@ -284,7 +286,7 @@ fun NotesScreen(
      */
     pendingScrollReference: BibleReferenceSelection? = null,
     onScrollReferenceConsumed: () -> Unit = {},
-    onOpenBibleReference: (book: String, chapter: Int, verse: Int) -> Unit = { _, _, _ -> },
+    onOpenBibleReference: (book: String, chapter: Int?, verse: Int?) -> Unit = { _, _, _ -> },
     onHoverBibleReference: (BibleReferenceSelection?) -> Unit = { _ -> }
 ) {
     // Mutable so deletions refresh the sidebar immediately. Re-read from
@@ -300,6 +302,11 @@ fun NotesScreen(
     // AlertDialog renders; both the EditorHeader "Delete" button and the
     // sidebar card's hover-delete funnel into this.
     var deleteCandidate by remember { mutableStateOf<ParsedNote?>(null) }
+
+    // Which reference picker (verse / chapter / book) is open, or null
+    // when closed. Opened from the Insert ribbon buttons and the Ctrl+K /
+    // Ctrl+Shift+K shortcuts; inserts the selected reference at the caret.
+    var referencePickerKind by remember { mutableStateOf<ReferenceKind?>(null) }
     var editorValue by remember { mutableStateOf(TextFieldValue("")) }
     var saving by remember { mutableStateOf(false) }
 
@@ -915,6 +922,9 @@ fun NotesScreen(
                             onSelectAll = { selectAllText() },
                             onRemoveColor = { removeColor() },
                             onClearFormatting = { clearFormatting() },
+                            onOpenReferencePicker = { kind ->
+                                referencePickerKind = kind
+                            },
                             onInsertDate = { insertDate() }
                         )
 
@@ -1066,18 +1076,15 @@ fun NotesScreen(
                                     onForceRtl = {
                                         applyEditorChange(forceLineOrientation(editorValue, true))
                                     },
-                                    // Insert scaffolds (Ctrl+K /
-                                    // Ctrl+Shift+K). Mirror the
-                                    // toolbar's Reference / Book buttons.
+                                    // Insert pickers (Ctrl+K opens the
+                                    // verse picker, Ctrl+Shift+K the book
+                                    // picker). Mirror the toolbar's
+                                    // Reference / Chapter / Book buttons.
                                     onInsertReference = {
-                                        applyEditorChange(
-                                            insertAtSelection(editorValue, "\$Book\$1\$1 ")
-                                        )
+                                        referencePickerKind = ReferenceKind.VERSE
                                     },
                                     onInsertBook = {
-                                        applyEditorChange(
-                                            insertAtSelection(editorValue, "\$Book ")
-                                        )
+                                        referencePickerKind = ReferenceKind.BOOK
                                     }
                                 )
                             },
@@ -1132,7 +1139,260 @@ fun NotesScreen(
                     }
                 )
             }
+
+            // Bible-reference picker. Rendered outside the toolbar so the
+            // dialog stays mounted while the picker's own state (typed book
+            // query, selected chapter / verse) is composed.
+            referencePickerKind?.let { kind ->
+                ReferenceInsertDialog(
+                    initialKind = kind,
+                    onDismiss = { referencePickerKind = null },
+                    onInsert = { text ->
+                        referencePickerKind = null
+                        applyEditorChange(insertAtSelection(editorValue, text))
+                    }
+                )
+            }
         }
+}
+
+
+/**
+ * Word-style "Insert reference" picker. The user types a book name into a
+ * field with autocomplete (suggestions filtered from the bundled Bible),
+ * optionally narrows to a chapter / verse, and confirms with Insert or
+ * Enter. Inserts `$Book$C$V ` / `$Book$C ` / `$Book ` at the caret.
+ */
+@Composable
+private fun ReferenceInsertDialog(
+    initialKind: ReferenceKind,
+    onDismiss: () -> Unit,
+    onInsert: (String) -> Unit
+) {
+    var kind by remember { mutableStateOf(initialKind) }
+    var bookQuery by remember { mutableStateOf("") }
+    var chapterText by remember { mutableStateOf("1") }
+    var verseText by remember { mutableStateOf("1") }
+    var showSuggestions by remember { mutableStateOf(false) }
+
+    val allBooks = BibleRepository.books
+    val query = bookQuery.trim()
+    // Autocomplete: books whose name contains the typed query, in
+    // canonical Bible order. Empty query → hide the list entirely.
+    val suggestions = remember(query) {
+        if (query.isEmpty()) emptyList()
+        else allBooks.filter { it.name.contains(query, ignoreCase = true) }.take(8)
+    }
+    val selectedBook = allBooks.find { it.name.equals(query, ignoreCase = true) }
+    val chapterNumber = chapterText.toIntOrNull()
+    val verseNumber = verseText.toIntOrNull()
+    val selectedChapter = selectedBook?.chapters?.find { it.chapter == chapterNumber }
+
+    // Validation: book must resolve, chapter within range for CHAPTER /
+    // VERSE kinds, verse within range for VERSE kind.
+    val chapterValid = selectedBook != null &&
+        chapterNumber != null &&
+        chapterNumber in 1..selectedBook.chapters.size
+    val verseValid = selectedChapter != null &&
+        verseNumber != null &&
+        verseNumber in 1..selectedChapter.verses.size
+    val canInsert = when (kind) {
+        ReferenceKind.BOOK -> selectedBook != null
+        ReferenceKind.CHAPTER -> chapterValid
+        ReferenceKind.VERSE -> chapterValid && verseValid
+    }
+
+    val insertText = buildString {
+        append('$')
+        append(selectedBook?.name ?: query)
+        if (kind != ReferenceKind.BOOK) {
+            append('$')
+            append(chapterNumber ?: 1)
+        }
+        if (kind == ReferenceKind.VERSE) {
+            append('$')
+            append(verseNumber ?: 1)
+        }
+        append(' ')
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Insert Bible reference") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Granularity selector (Word-style segmented choice).
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ReferenceKind.entries.forEach { k ->
+                        val isSelected = k == kind
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                            },
+                            modifier = Modifier
+                                .clickable {
+                                    SoundManager.play(SoundEvent.Click)
+                                    kind = k
+                                }
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = k.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Book name field with autocomplete suggestions. The
+                // suggestions render inline (below the field) so they can't
+                // be clipped by the dialog bounds — they expand the dialog
+                // briefly instead of overlaying the chapter/verse fields.
+                OutlinedTextField(
+                    value = bookQuery,
+                    onValueChange = {
+                        bookQuery = it
+                        showSuggestions = true
+                    },
+                    label = { Text("Book") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onPreviewKeyEvent { event ->
+                            // Enter picks the first suggestion when the
+                            // query isn't an exact book name yet.
+                            if (event.key == Key.Enter &&
+                                selectedBook == null &&
+                                suggestions.isNotEmpty()
+                            ) {
+                                bookQuery = suggestions.first().name
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                )
+                if (showSuggestions && suggestions.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        tonalElevation = 3.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column {
+                            suggestions.forEach { book ->
+                                Text(
+                                    text = book.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            SoundManager.play(SoundEvent.Click)
+                                            bookQuery = book.name
+                                            showSuggestions = false
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (kind != ReferenceKind.BOOK) {
+                    OutlinedTextField(
+                        value = chapterText,
+                        onValueChange = {
+                            chapterText = it.filter { c -> c.isDigit() }.take(3)
+                        },
+                        label = {
+                            Text(
+                                "Chapter" + selectedBook?.let {
+                                    " (1–${it.chapters.size})"
+                                }.orEmpty()
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onPreviewKeyEvent { event ->
+                                // Enter commits the reference once the
+                                // chapter (and, for verse refs, the verse)
+                                // fields are valid.
+                                if (event.key == Key.Enter && canInsert) {
+                                    onInsert(insertText)
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                    )
+                }
+
+                if (kind == ReferenceKind.VERSE) {
+                    OutlinedTextField(
+                        value = verseText,
+                        onValueChange = {
+                            verseText = it.filter { c -> c.isDigit() }.take(3)
+                        },
+                        label = {
+                            Text(
+                                "Verse" + selectedChapter?.let {
+                                    " (1–${it.verses.size})"
+                                }.orEmpty()
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onPreviewKeyEvent { event ->
+                                if (event.key == Key.Enter && canInsert) {
+                                    onInsert(insertText)
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                    )
+                }
+
+                Text(
+                    text = "Inserts: $insertText",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (canInsert) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canInsert,
+                onClick = {
+                    SoundManager.play(SoundEvent.Click)
+                    onInsert(insertText)
+                }
+            ) {
+                Text("Insert")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                SoundManager.play(SoundEvent.Click)
+                onDismiss()
+            }) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 
@@ -1231,6 +1491,13 @@ private fun EditorToolbar(
     onSelectAll: () -> Unit,
     onRemoveColor: () -> Unit,
     onClearFormatting: () -> Unit,
+    /**
+     * Open the Bible-reference picker dialog pre-set to the given
+     * granularity. The dialog lets the user type a book name (with
+     * autocomplete) and choose chapter / verse before inserting the
+     * `$Book$C$V` / `$Book$C` / `$Book` line at the caret.
+     */
+    onOpenReferencePicker: (ReferenceKind) -> Unit,
     onInsertDate: () -> Unit
 ) {
     val dividerColor = MaterialTheme.colorScheme.outlineVariant
@@ -1319,15 +1586,21 @@ private fun EditorToolbar(
 
             // -----------------------------------------------------------------
             // Insert — Bible references & date (Word: Insert > Text).
+            // Each reference button opens the target picker pre-set to its
+            // granularity (verse / chapter / book) so the user can select
+            // the actual book, chapter and verse before inserting.
             // -----------------------------------------------------------------
             RibbonTab.INSERT -> {
                 ToolbarRow {
                     ToolbarGroup("Insert") {
                         StyleButton(icon = RibbonIcons.Reference, accent = true, tooltip = "Insert Bible reference", shortcut = "Ctrl+K") {
-                            onEditorValueChange(insertAtSelection(editorValue, "\$Book\$1\$1 "))
+                            onOpenReferencePicker(ReferenceKind.VERSE)
+                        }
+                        StyleButton(icon = RibbonIcons.Chapter, accent = true, tooltip = "Insert chapter reference") {
+                            onOpenReferencePicker(ReferenceKind.CHAPTER)
                         }
                         StyleButton(icon = RibbonIcons.Book, accent = true, tooltip = "Insert book reference", shortcut = "Ctrl+Shift+K") {
-                            onEditorValueChange(insertAtSelection(editorValue, "\$Book "))
+                            onOpenReferencePicker(ReferenceKind.BOOK)
                         }
                         StyleButton(icon = RibbonIcons.Date, accent = true, tooltip = "Insert today's date") {
                             onInsertDate()
@@ -1494,6 +1767,18 @@ private fun RibbonTabBar(
             }
         }
     }
+}
+
+
+/**
+ * Granularity of a Bible reference being inserted via the picker dialog.
+ * VERSE produces `$Book$C$V`, CHAPTER produces `$Book$C`, BOOK produces
+ * just `$Book`.
+ */
+private enum class ReferenceKind(val label: String) {
+    VERSE("Verse"),
+    CHAPTER("Chapter"),
+    BOOK("Book")
 }
 
 
@@ -2892,12 +3177,8 @@ private class NoteVisualTransformation(
             }
         }
 
-        referenceLineRegex.matchEntire(raw)?.let { match ->
-            val chapter = match.groupValues[2].toIntOrNull()
-            val verse = match.groupValues[3].toIntOrNull()
-            if (chapter != null && verse != null) {
-                return LineAnalysis(BlockKind.REFERENCE, hiddenLen = 0, isReferenceLine = true)
-            }
+        referenceLineRegex.matchEntire(raw)?.let {
+            return LineAnalysis(BlockKind.REFERENCE, hiddenLen = 0, isReferenceLine = true)
         }
 
         coloredQuoteRegex.matchEntire(raw)?.let { match ->
@@ -3254,8 +3535,8 @@ private fun colorFromHex(hex: String): Color? {
 private fun findFirstReferenceOffset(
     source: String,
     book: String,
-    chapter: Int,
-    verse: Int
+    chapter: Int?,
+    verse: Int?
 ): Int? {
     var pos = 0
     while (pos <= source.length) {
@@ -3268,10 +3549,12 @@ private fun findFirstReferenceOffset(
                 val lineBook = match.groupValues[1].trim()
                 val lineChapter = match.groupValues[2].toIntOrNull()
                 val lineVerse = match.groupValues[3].toIntOrNull()
-                if (lineChapter == chapter &&
-                    lineVerse == verse &&
-                    lineBook.equals(book, ignoreCase = true)
-                ) {
+                // Match the requested granularity: verse refs require the
+                // chapter+verse pair, chapter refs require the chapter,
+                // book refs match on the book name alone.
+                val chapterOk = chapter == null || lineChapter == chapter
+                val verseOk = verse == null || lineVerse == verse
+                if (lineBook.equals(book, ignoreCase = true) && chapterOk && verseOk) {
                     return pos
                 }
             }
@@ -3808,8 +4091,8 @@ private class UndoManager(private val maxSize: Int = 200) {
 
 private data class ReferenceMatch(
     val book: String,
-    val chapter: Int,
-    val verse: Int,
+    val chapter: Int?,
+    val verse: Int?,
     val label: String? = null
 )
 
@@ -3835,16 +4118,12 @@ private fun buildReferenceLookup(text: String): ReferenceLookup {
             else -> raw
         }
         referenceLineRegex.matchEntire(stripped)?.let { match ->
-            val chapter = match.groupValues[2].toIntOrNull()
-            val verse = match.groupValues[3].toIntOrNull()
-            if (chapter != null && verse != null) {
-                byLine[scan] = ReferenceMatch(
-                    book = match.groupValues[1].trim(),
-                    chapter = chapter,
-                    verse = verse,
-                    label = match.groupValues[4].trim().ifBlank { null }
-                )
-            }
+            byLine[scan] = ReferenceMatch(
+                book = match.groupValues[1].trim(),
+                chapter = match.groupValues[2].toIntOrNull(),
+                verse = match.groupValues[3].toIntOrNull(),
+                label = match.groupValues[4].trim().ifBlank { null }
+            )
         }
         starts[idx++] = scan
         if (nl == -1) break
@@ -3960,11 +4239,11 @@ private fun handleEditorShortcut(
      */
     onForceRtl: () -> Unit,
     /**
-     * Insert a `$Book$1$1 ` verse-reference scaffold at the caret.
+     * Open the verse-reference picker (Ctrl+K).
      */
     onInsertReference: () -> Unit,
     /**
-     * Insert a `$Book ` book-reference scaffold at the caret.
+     * Open the book-reference picker (Ctrl+Shift+K).
      */
     onInsertBook: () -> Unit
 ): Boolean {

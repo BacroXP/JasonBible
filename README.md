@@ -62,20 +62,33 @@ Install it with:
 sudo apt install ./bibleapp_1.0.0_amd64.deb
 ```
 
-### Build a release
+### Installers for all platforms
+
+Every **release** on the [Releases](https://github.com/BacroXP/JasonBible/releases) page ships an installer
+for each platform, built automatically by GitHub Actions on its native OS:
+
+| Platform | File | Built on |
+|----------|------|----------|
+| Linux | `.deb` | Ubuntu runner |
+| Windows | `.msi` | Windows runner (WiX) |
+| macOS | `.dmg` | macOS runner |
+
+Each format is only buildable on its own OS (the Compose Gradle plugin can't
+cross-compile MSI / DMG), so the CI workflow builds all three in parallel and
+attaches them to the release.
+
+### Build a release locally
 
 ```bash
 # Linux .deb
 ./gradlew packageDeb
-# macOS .dmg
+# macOS .dmg (requires macOS)
 ./gradlew packageDmg
-# Windows .msi
+# Windows .msi (requires Windows)
 ./gradlew packageMsi
 ```
 
 The `.deb` is written to `build/compose/binaries/main/deb/`.
-
-Or grab the latest build from the **Releases** page.
 
 ---
 
