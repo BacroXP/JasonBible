@@ -45,9 +45,21 @@ formatted notes, and study with confidence — no internet connection required.
 ### Run from source
 
 ```bash
-git clone https://github.com/<your-user>/BibleApp.git
-cd BibleApp
+git clone https://github.com/BacroXP/JasonBible.git
+cd JasonBible
 ./gradlew run
+```
+
+### Download the .deb
+
+A ready-to-install package lives right in this repository:
+
+[⬇️ Download `bibleapp_1.0.0_amd64.deb`](bibleapp_1.0.0_amd64.deb)
+
+Install it with:
+
+```bash
+sudo apt install ./bibleapp_1.0.0_amd64.deb
 ```
 
 ### Build a release
@@ -63,13 +75,7 @@ cd BibleApp
 
 The `.deb` is written to `build/compose/binaries/main/deb/`.
 
-### Install the .deb (Ubuntu / Debian)
-
-```bash
-sudo apt install ./bibleapp_1.0.0_amd64.deb
-```
-
-Or download the latest release from the **Releases** page and double-click it.
+Or grab the latest build from the **Releases** page.
 
 ---
 
