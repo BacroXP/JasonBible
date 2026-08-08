@@ -130,3 +130,4 @@ a failing test blocks the installer builds by design.
 | `release` job failed with permission error | The job needs `contents: write` on the repo (already configured in the workflow; verify repo settings don't override it). |
 | MSI/DMG missing | They can only be built on Windows/macOS runners — check the respective job logs for toolchain issues (WiX download, `hdiutil`). |
 | `test` job failed | A unit test is broken — fix and push again before tagging. |
+| `check-file-sizes` job failed | A tracked file exceeds GitHub's 100 MB per-file limit (files over 50 MB only warn). Move the file out of the repo — e.g. attach it to the release as an asset instead — then push again. |

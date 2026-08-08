@@ -13,6 +13,33 @@ permissions:
   contents: read
 
 jobs:
+  # Large-file guard: GitHub hard-rejects any push containing a file over
+  # 100 MiB (even if it only exists in history), and warns at 50 MiB. Scan
+  # every tracked file on EVERY push so an oversized resource fails here
+  # with a clear annotation instead of a confusing push rejection — and
+  # gate the installer builds on it, so a release can never be built from
+  # a tree that couldn't be pushed in the first place.
+  check-file-sizes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if any tracked file exceeds GitHub's 100 MB limit
+        run: |
+          hard_limit=$((100 * 1024 * 1024))
+          warn_limit=$((50 * 1024 * 1024))
+          fail=0
+          while IFS= read -r -d '' file; do
+            size=$(stat -c %s "$file")
+            if [ "$size" -gt "$hard_limit" ]; then
+              echo "::error::$file is $(numfmt --to=iec "$size") — exceeds GitHub's 100 MB per-file limit; the push would be rejected. Move it out of the repo (e.g. attach it to a Release instead)."
+              fail=1
+            elif [ "$size" -gt "$warn_limit" ]; then
+              echo "::warning::$file is $(numfmt --to=iec "$size") — approaching GitHub's 100 MB per-file limit."
+            fi
+          done < <(git ls-files -z)
+          exit "$fail"
+
   # Desktop unit tests (pure logic: search matching, note parser, Bible
   # catalog aliasing, copy formatting) run on EVERY push to any branch.
   # The installer jobs below additionally depend on this job, so a broken
@@ -40,7 +67,7 @@ jobs:
   # stay limited to version tags.
 
   build-deb:
-    needs: [test]
+    needs: [test, check-file-sizes]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -60,7 +87,7 @@ jobs:
           path: build/compose/binaries/main/deb/*.deb
 
   build-msi:
-    needs: [test]
+    needs: [test, check-file-sizes]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
@@ -82,7 +109,7 @@ jobs:
           path: build/compose/binaries/main/msi/*.msi
 
   build-dmg:
-    needs: [test]
+    needs: [test, check-file-sizes]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     steps:
