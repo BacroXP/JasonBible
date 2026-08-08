@@ -11,7 +11,6 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 
 
 
@@ -92,18 +91,20 @@ internal fun handleEditorShortcut(
      */
     onInlineWrap: (marker: String) -> Unit,
     /**
-     * Cycle the cursor line's text-direction marker LTR → RTL → LTR.
+     * Align the cursor line (or selection) left — strips any
+     * center/right alignment marker.
      */
-    onCycleOrientation: () -> Unit,
+    onAlignLeft: () -> Unit,
     /**
-     * Force the cursor line to LTR (strip any RLM/LRM marker).
+     * Align the cursor line (or selection) center; a re-press returns
+     * it to left.
      */
-    onForceLtr: () -> Unit,
+    onAlignCenter: () -> Unit,
     /**
-     * Force the cursor line to RTL (prepend RLM after stripping any
-     * existing marker — re-press lands on the same state).
+     * Align the cursor line (or selection) right; a re-press returns
+     * it to left.
      */
-    onForceRtl: () -> Unit,
+    onAlignRight: () -> Unit,
     /**
      * Open the verse-reference picker (Ctrl+K).
      */
@@ -205,20 +206,21 @@ internal fun handleEditorShortcut(
             onBack()
             true
         }
-        // Direction toggles. Markdown has no alignment so we map
-        // "left/center/right" to the existing LTR/RLM direction
-        // markers in the markdown source. Right-click on this if the
-        // user wants real visual alignment.
+        // Real paragraph alignment — left / center / right. Stored as
+        // invisible leading markers and rendered via ParagraphStyle
+        // textAlign; Ctrl+E toggles center off when already centered.
+        // Text direction (LTR/RTL) stays available on the Layout tab's
+        // direction button.
         Key.L -> {
-            onForceLtr()
+            onAlignLeft()
             true
         }
         Key.E -> {
-            onCycleOrientation()
+            onAlignCenter()
             true
         }
         Key.R -> {
-            onForceRtl()
+            onAlignRight()
             true
         }
         // Insert Reference / Book scaffolds. K with Shift is the

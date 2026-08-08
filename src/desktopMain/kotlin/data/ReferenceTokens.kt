@@ -337,3 +337,42 @@ fun findReferenceTokens(content: String): List<ReferenceToken> {
     }
     return result
 }
+
+
+/**
+ * A note-to-note link token found in running text — e.g. the
+ * `[[Prayer Notes]]` inside "See [[Prayer Notes]] for more". [title] is
+ * the linked note's title (the target of the link, trimmed);
+ * [sourceStart] / [sourceEnd] are char offsets into the scanned string
+ * (end exclusive) and INCLUDE the `[[` / `]]` delimiters, so the editor
+ * can hide the brackets and render the title as a clickable chip.
+ */
+data class NoteLinkToken(
+    val title: String,
+    val sourceStart: Int,
+    val sourceEnd: Int
+)
+
+
+private val NOTE_LINK_TOKEN_REGEX = Regex("\\[\\[([^\\]]+)\\]\\]")
+
+
+/**
+ * Find `[[Title]]` note links embedded anywhere in [content] — in
+ * paragraphs, lists or the trailing text of colored quotes. The
+ * delimiters are part of every token so tap/hit-testing and the visual
+ * transformation agree on the exact source range to hide.
+ *
+ * A link whose inner text itself contains another token's marker
+ * (`$` Bible reference, `@` media) is skipped and stays plain text —
+ * nesting two chip kinds would produce overlapping mapping spans in
+ * the editor.
+ */
+fun findNoteLinkTokens(content: String): List<NoteLinkToken> =
+    NOTE_LINK_TOKEN_REGEX.findAll(content)
+        .filter { match ->
+            val inner = match.groupValues[1]
+            !inner.contains('$') && !inner.contains('@')
+        }
+        .map { NoteLinkToken(it.groupValues[1].trim(), it.range.first, it.range.last + 1) }
+        .toList()

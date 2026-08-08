@@ -281,6 +281,9 @@ internal fun VerseRow(
     strongsLoaded: Boolean = false,
     activeStudyWord: StudyWordToken? = null,
     onToggleStudyWord: (StudyWordToken) -> Unit = {},
+    /** Opens the central lexicon at a Strong's number (wired by the host
+     *  screen; defaults to no-op). */
+    onOpenLexicon: (String) -> Unit = {},
     // Interlinear: the matching Greek TR verse (trparsed) to render
     // beneath the English text, or null when the interlinear view is off
     // or the Greek module has no verse for this reference.
@@ -336,9 +339,9 @@ internal fun VerseRow(
     }
 
     val highlightColor = when {
-        markerPreview != null && (selected || hoverHighlighted) -> colorFromHex(markerPreview).copy(alpha = 0.32f)
-        markerPreview != null && hoverHighlighted -> colorFromHex(markerPreview).copy(alpha = 0.22f)
-        markerPreview != null -> colorFromHex(markerPreview).copy(alpha = 0.18f)
+        markerPreview != null && (selected || hoverHighlighted) -> colorFromHexInternal(markerPreview).copy(alpha = 0.32f)
+        markerPreview != null && hoverHighlighted -> colorFromHexInternal(markerPreview).copy(alpha = 0.22f)
+        markerPreview != null -> colorFromHexInternal(markerPreview).copy(alpha = 0.18f)
         selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
         hoverHighlighted -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
         hovered -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
@@ -498,6 +501,7 @@ internal fun VerseRow(
                 bookNumber = bookNumber,
                 chapterNumber = chapterNumber,
                 verseNumber = verseNumber,
+                currentColorHex = markerPreview,
                 copyText = copyText,
                 onOpenNoteTitle = onOpenNoteTitle,
                 onPickColor = onToggleMarker
@@ -508,7 +512,8 @@ internal fun VerseRow(
             WordStudyPanel(
                 token = activeForThisVerse,
                 loaded = strongsLoaded,
-                onClose = { onToggleStudyWord(activeForThisVerse) }
+                onClose = { onToggleStudyWord(activeForThisVerse) },
+                onOpenLexicon = onOpenLexicon
             )
         }
     }
@@ -521,11 +526,20 @@ private fun VerseMarkerPanel(
     bookNumber: Int,
     chapterNumber: Int,
     verseNumber: Int,
+    currentColorHex: String?,
     copyText: String,
     onOpenNoteTitle: (String, BibleReferenceSelection?) -> Unit,
     onPickColor: (String?) -> Unit
 ) {
     val references = NotesRepository.referencesForVerse(bookName, chapterNumber, verseNumber)
+
+    // Custom-color picker: opened from the rainbow dot, seeded with the
+    // verse's current marker color (or a fresh yellow). The hex field
+    // beneath the dots applies a typed color immediately.
+    var pickerOpen by remember { mutableStateOf(false) }
+    var hexText by remember(bookNumber, chapterNumber, verseNumber, currentColorHex) {
+        mutableStateOf(currentColorHex?.uppercase() ?: "#FFD54F")
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -599,8 +613,69 @@ private fun VerseMarkerPanel(
                         onPickColor(null)
                     }
                 )
+
+                // Custom color: rainbow dot opens the picker dialog;
+                // when the verse uses a non-preset color, the dot shows it.
+                val custom = currentColorHex?.takeIf { hex ->
+                    MarkerColor.entries.none { it.hex.equals(hex, ignoreCase = true) }
+                }
+                Box(contentAlignment = Alignment.Center) {
+                    if (custom != null) {
+                        ColorDot(
+                            color = colorFromHexInternal(custom),
+                            onClick = { pickerOpen = true }
+                        )
+                    } else {
+                        RainbowDot(
+                            modifier = Modifier.size(28.dp),
+                            onClick = { pickerOpen = true }
+                        )
+                    }
+                }
+            }
+
+            // Hex color field: type a #RRGGBB value to apply it directly
+            // (Enter commits; the field border turns red while invalid).
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HexColorField(
+                    value = hexText,
+                    onValueChange = { raw ->
+                        hexText = sanitizeHexInput(raw)
+                        if (isValidMarkerHex(hexText)) {
+                            SoundManager.play(SoundEvent.Click)
+                            onPickColor(hexText)
+                        }
+                    },
+                    onCommit = {
+                        if (isValidMarkerHex(hexText)) {
+                            SoundManager.play(SoundEvent.Click)
+                            onPickColor(hexText)
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "Custom",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
+    }
+
+    if (pickerOpen) {
+        ColorPickerDialog(
+            initialHex = currentColorHex,
+            onDismiss = { pickerOpen = false },
+            onPick = { hex ->
+                SoundManager.play(SoundEvent.Click)
+                onPickColor(hex)
+                pickerOpen = false
+            }
+        )
     }
 }
 
@@ -647,7 +722,7 @@ private fun NoteChip(
         }
     }
     Card(
-        shape = RoundedCornerShape(999.dp),
+        shape = PillShape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         modifier = Modifier
             .hoverable(hoverSource)
@@ -758,14 +833,14 @@ private fun copyTranslationSuffix(): String {
 /**
  * Compact copy pill with transient "✓ Copied" feedback. Writes the
  * pre-formatted [copyText] to the system clipboard on click. Defaults to
- * the per-verse "📋 Copy" label; chapter/other callers pass their own
+ * the per-verse "Copy" label; chapter/other callers pass their own
  * label via [label].
  */
 @Composable
 internal fun CopyPill(
     copyText: String,
     modifier: Modifier = Modifier,
-    label: String = "📋 Copy"
+    label: String = "Copy"
 ) {
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
@@ -804,36 +879,10 @@ internal fun CopyPill(
                 } else {
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
                 },
-                shape = RoundedCornerShape(999.dp)
+                shape = PillShape
             )
             .padding(horizontal = 10.dp, vertical = 5.dp)
     )
-}
-
-
-private fun colorFromHex(hex: String): Color {
-    return runCatching {
-        val cleaned = hex.removePrefix("#")
-        val value = cleaned.toLong(16)
-        when (cleaned.length) {
-            6 -> Color(
-                red = ((value shr 16) and 0xFF).toFloat() / 255f,
-                green = ((value shr 8) and 0xFF).toFloat() / 255f,
-                blue = (value and 0xFF).toFloat() / 255f
-            )
-
-            8 -> Color(
-                alpha = ((value shr 24) and 0xFF).toFloat() / 255f,
-                red = ((value shr 16) and 0xFF).toFloat() / 255f,
-                green = ((value shr 8) and 0xFF).toFloat() / 255f,
-                blue = (value and 0xFF).toFloat() / 255f
-            )
-
-            else -> Color(0xFF6750A4)
-        }
-    }.getOrElse {
-        Color(0xFF6750A4)
-    }
 }
 
 

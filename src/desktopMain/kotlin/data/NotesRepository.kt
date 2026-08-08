@@ -13,7 +13,10 @@ import model.VerseReferenceBlock
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.extension
-import kotlin.io.path.nameWithoutExtension
+import ui.coloredQuoteRegex
+import ui.orderedListRegex
+import ui.referenceLineRegex
+import ui.stripLeadingMarkers
 
 
 object NotesRepository {
@@ -24,9 +27,25 @@ object NotesRepository {
         "notes"
     )
 
-    val notes: List<ParsedNote> by lazy {
-        ensureSeeded()
-        loadNotes()
+    // Verse-scoped lookups (notesForVerse / referencesForVerse / …) read
+    // this cached list. Unlike the lazy `val` it used to be, the cache is
+    // invalidated on every write (save / create / delete), so a rename —
+    // or any title edit — is immediately reflected in the Bible pane's
+    // note chips instead of lingering until restart.
+    @Volatile
+    private var notesCache: List<ParsedNote>? = null
+
+    val notes: List<ParsedNote>
+        get() {
+            if (notesCache == null) {
+                ensureSeeded()
+                notesCache = loadNotes()
+            }
+            return notesCache!!
+        }
+
+    private fun invalidateNotes() {
+        notesCache = null
     }
 
 
@@ -39,30 +58,73 @@ object NotesRepository {
 
     fun findByTitle(title: String): ParsedNote? {
         ensureSeeded()
-        return listFiles().find { it.title == title }
+        val all = listFiles()
+        // Exact match first; a case-insensitive fallback keeps `[[title]]`
+        // links working when the note's actual title differs in case.
+        return all.find { it.title == title }
+            ?: all.find { it.title.equals(title, ignoreCase = true) }
     }
 
 
+    /**
+     * Save [content] to a file whose name matches the note's title — the
+     * first `# ` heading, sanitized (same scheme as [createNote]). When
+     * the title changed and the file's name no longer matches it, the
+     * note is RENAMED on disk so the sidebar / file explorer always show
+     * the title's name.
+     *
+     * Safety guarantees that keep sibling notes intact:
+     *  - The target name is deduplicated with a `-1`, `-2`, … suffix when
+     *    it is already taken by ANOTHER note, so a rename can never
+     *    overwrite (destroy) a different note's file.
+     *  - The new file is written BEFORE the old one is deleted, so a
+     *    failed write can never leave the note lost.
+     *  - A title that sanitizes to the current file name (no-op rename,
+     *    e.g. only case / spacing changed) stays in place.
+     *
+     * Returns the parsed note at its (possibly new) path.
+     */
     fun saveNote(originalFileName: String?, content: String): ParsedNote {
         ensureSeeded()
 
         val parsedTitle = extractTitle(content)
-        val safeFileName = sanitizeFileName(parsedTitle.ifBlank { "note" }) + ".note"
-        val targetPath = notesDir.resolve(safeFileName)
+        val safeBase = sanitizeFileName(parsedTitle.ifBlank { "note" })
 
-        if (!Files.exists(notesDir)) {
-            Files.createDirectories(notesDir)
+        // The note may live inside a FOLDER ("Study/Name.note") — the
+        // rename target must stay in that folder, otherwise a title edit
+        // would silently drag the note out of its folder to the root.
+        val folderPart = originalFileName?.substringBeforeLast('/', "")
+            ?.let { if (it.isEmpty() || it == originalFileName) "" else it }
+            .orEmpty()
+
+        // Walk to a free name like createNote does. The file the user is
+        // currently editing (originalFileName) is skipped by the loop so
+        // a title that already matches its path keeps that path — only a
+        // name owned by a DIFFERENT note forces the -1, -2, … suffix.
+        var fileName = if (folderPart.isEmpty()) "$safeBase.note" else "$folderPart/$safeBase.note"
+        var counter = 1
+        while (Files.exists(notesDir.resolve(fileName)) && fileName != originalFileName) {
+            fileName = if (folderPart.isEmpty()) {
+                "${safeBase}-$counter.note"
+            } else {
+                "$folderPart/${safeBase}-$counter.note"
+            }
+            counter++
         }
+        val targetPath = notesDir.resolve(fileName)
+        Files.createDirectories(targetPath.parent)
 
+        // Write first, then delete the old file — never the reverse.
         Files.writeString(targetPath, content.trimEnd() + "\n")
 
-        if (!originalFileName.isNullOrBlank() && originalFileName != safeFileName) {
+        if (!originalFileName.isNullOrBlank() && fileName != originalFileName) {
             val oldPath = notesDir.resolve(originalFileName)
             if (Files.exists(oldPath)) {
                 Files.delete(oldPath)
             }
         }
 
+        invalidateNotes()
         return parseNoteFile(targetPath)
     }
 
@@ -81,7 +143,9 @@ object NotesRepository {
         if (!Files.exists(notesDir)) {
             Files.createDirectories(notesDir)
         }
+        Files.createDirectories(targetPath.parent)
         Files.writeString(targetPath, content.trimEnd() + "\n")
+        invalidateNotes()
         return parseNoteFile(targetPath)
     }
 
@@ -94,11 +158,13 @@ object NotesRepository {
     fun deleteNote(fileName: String): Boolean {
         ensureSeeded()
         val path = notesDir.resolve(fileName)
-        return if (Files.exists(path)) {
+        val deleted = if (Files.exists(path)) {
             runCatching { Files.delete(path) }.isSuccess
         } else {
             false
         }
+        if (deleted) invalidateNotes()
+        return deleted
     }
 
 
@@ -109,27 +175,74 @@ object NotesRepository {
      * a unique file. Content is a single `# Title` heading line — the
      * user renames by editing the first line (same as any other note).
      */
-    fun createNote(title: String = "Untitled"): ParsedNote {
+    fun createNote(title: String = "Untitled", folder: String = ""): ParsedNote {
         // ensureSeeded() guarantees the notes directory exists.
         ensureSeeded()
+
+        val dir = if (folder.isBlank()) notesDir else notesDir.resolve(folder)
+        Files.createDirectories(dir)
 
         val safeBase = sanitizeFileName(title).ifBlank { "untitled" }
         var fileName = "$safeBase.note"
         var counter = 1
-        while (Files.exists(notesDir.resolve(fileName))) {
+        while (Files.exists(dir.resolve(fileName))) {
             fileName = "${safeBase}-$counter.note"
             counter++
         }
 
         val heading = title.trim().ifBlank { "Untitled" }
-        Files.writeString(notesDir.resolve(fileName), "# $heading\n")
-        return parseNoteFile(notesDir.resolve(fileName))
+        Files.writeString(dir.resolve(fileName), "# $heading\n")
+        invalidateNotes()
+        return parseNoteFile(dir.resolve(fileName))
     }
 
 
     fun listFiles(): List<ParsedNote> {
         ensureSeeded()
         return loadNotes()
+    }
+
+
+    // ------------------------------------------------------------------
+    // Imported media files (`@file:` references)
+    // ------------------------------------------------------------------
+
+    /** The subfolder holding media files imported into notes. */
+    fun mediaDir(): Path = notesDir.resolve("media")
+
+    /**
+     * Resolve a `@file:` reference payload (e.g. `media/photo-abc123.jpg`)
+     * to its absolute on-disk path, or null when the file doesn't exist.
+     * Absolute payloads resolve directly (Path.resolve semantics);
+     * relative ones resolve against the notes directory.
+     */
+    fun resolveMediaRef(ref: String): Path? =
+        notesDir.resolve(ref).takeIf { Files.exists(it) && Files.isRegularFile(it) }
+
+    /**
+     * Copy a local media file (image / video / audio) into the notes
+     * media folder under a unique sanitized name and return the
+     * `media/<name>` reference to embed as `@file:…`, or null when the
+     * file isn't a supported media type or can't be copied.
+     */
+    fun importMediaFile(source: Path): String? {
+        if (!Files.isRegularFile(source)) return null
+        val name = source.fileName.toString()
+        if (mediaKindFor(name) == null) return null
+        val ext = name.substringAfterLast('.', "").lowercase()
+        val base = name.removeSuffix(".$ext")
+            .replace(Regex("""[^\p{L}\p{Nd}._-]+"""), "-")
+            .trim('-')
+            .ifBlank { "media" }
+        // Timestamp suffix keeps every drop unique even when the same
+        // file is imported twice.
+        val targetName = "$base-${System.currentTimeMillis()}.$ext"
+        val target = mediaDir().resolve(targetName)
+        return runCatching {
+            Files.createDirectories(mediaDir())
+            Files.copy(source, target)
+            "media/$targetName"
+        }.getOrNull()
     }
 
 
@@ -143,15 +256,17 @@ object NotesRepository {
     fun fileSignatures(): List<String> {
         if (!Files.exists(notesDir)) return emptyList()
         return runCatching {
-            Files.list(notesDir).use { stream ->
+            Files.walk(notesDir).use { stream ->
                 stream
-                    .filter { path -> path.extension == "note" }
+                    .filter { path -> Files.isRegularFile(path) && path.extension == "note" }
                     .map { path ->
                         val mtime = runCatching {
                             Files.getLastModifiedTime(path).toMillis()
                         }.getOrDefault(0L)
                         val size = runCatching { Files.size(path) }.getOrDefault(0L)
-                        "${path.fileName}|$mtime|$size"
+                        // Relative path so moves / folder changes are seen.
+                        val rel = notesDir.relativize(path).toString().replace('\\', '/')
+                        "$rel|$mtime|$size"
                     }
                     .sorted()
                     .toList()
@@ -161,17 +276,9 @@ object NotesRepository {
 
 
     fun notesForVerse(bookName: String, chapter: Int, verse: Int): List<ParsedNote> {
-        val targetNumber = BibleRepository.bookNumberFor(bookName)
+        val targetNumber = BibleRepository.bookNumberFor(bookName) ?: return emptyList()
         return notes.filter { note ->
-            note.references.any { ref ->
-                // Case-insensitive AND cross-language: a German `$Lukas`
-                // ref still matches the English "Luke" verse panel (both
-                // resolve to the same canonical book number).
-                val refNumber = BibleRepository.bookNumberFor(ref.book)
-                refNumber != null && refNumber == targetNumber &&
-                    ref.chapter == chapter &&
-                    ref.verse == verse
-            }
+            note.references.any { matchesVerse(it, targetNumber, chapter, verse) }
         }
     }
 
@@ -224,7 +331,7 @@ object NotesRepository {
             val lines = note.content.lines()
             for (index in lines.indices) {
                 if (wholeWord) {
-                    if (!containsWholeWord(lines[index], q, ignoreCase = !matchCase)) continue
+                    if (findMatchIn(lines[index], q, 0, matchCase = matchCase, wholeWord = true) == -1) continue
                 } else if (!lines[index].contains(q, ignoreCase = !matchCase)) {
                     continue
                 }
@@ -242,35 +349,24 @@ object NotesRepository {
     }
 
     /**
-     * True when [q] occurs in [line] as a whole word — the characters
-     * immediately before and after it are not letters or digits, so "day"
-     * matches in "a day of" but not in "today" or "daylight". Same
-     * boundary semantics as the Bible search's matcher.
+     * True when [ref] points at the same verse as (bookName, chapter,
+     * verse) — case-insensitive AND cross-language: a German `$Lukas`
+     * ref still matches the English "Luke" verse panel (both resolve to
+     * the same canonical book number).
      */
-    private fun containsWholeWord(line: String, q: String, ignoreCase: Boolean): Boolean {
-        var index = line.indexOf(q, ignoreCase = ignoreCase)
-        while (index != -1) {
-            val before = if (index > 0) line[index - 1] else ' '
-            val after = if (index + q.length < line.length) line[index + q.length] else ' '
-            if (!before.isLetterOrDigit() && !after.isLetterOrDigit()) return true
-            index = line.indexOf(q, index + 1, ignoreCase = ignoreCase)
-        }
-        return false
+    private fun matchesVerse(ref: NoteReference, targetNumber: Int, chapter: Int, verse: Int): Boolean {
+        val refNumber = BibleRepository.bookNumberFor(ref.book)
+        return refNumber != null && refNumber == targetNumber &&
+            ref.chapter == chapter &&
+            ref.verse == verse
     }
 
     fun referencesForVerse(bookName: String, chapter: Int, verse: Int): List<NoteReference> {
-        val targetNumber = BibleRepository.bookNumberFor(bookName)
+        val targetNumber = BibleRepository.bookNumberFor(bookName) ?: return emptyList()
         return notes.flatMap { note ->
-            note.references.filter { ref ->
-                // Case-insensitive AND cross-language: a German `$Lukas`
-                // ref still shows under the English "Luke" verse panel.
-                val refNumber = BibleRepository.bookNumberFor(ref.book)
-                refNumber != null && refNumber == targetNumber &&
-                    ref.chapter == chapter &&
-                    ref.verse == verse
-            }.map { ref ->
-                ref.copy(noteTitle = note.title)
-            }
+            note.references
+                .filter { matchesVerse(it, targetNumber, chapter, verse) }
+                .map { ref -> ref.copy(noteTitle = note.title) }
         }
     }
 
@@ -319,9 +415,13 @@ object NotesRepository {
 
 
     private fun loadNotes(): List<ParsedNote> {
-        return Files.list(notesDir).use { stream ->
+        if (!Files.exists(notesDir)) return emptyList()
+        // Recursive walk so notes inside FOLDERS (subdirectories) appear
+        // in the sidebar too; the media subfolder contains no .note files
+        // and is skipped by the extension filter.
+        return Files.walk(notesDir).use { stream ->
             stream
-                .filter { path -> path.extension == "note" }
+                .filter { path -> Files.isRegularFile(path) && path.extension == "note" }
                 .sorted()
                 .map { path -> parseNoteFile(path) }
                 .toList()
@@ -332,15 +432,27 @@ object NotesRepository {
     private fun parseNoteFile(path: Path): ParsedNote {
         val content = Files.readString(path)
         val lines = content.lines()
-        val fileName = path.fileName.toString()
-        val fallbackTitle = path.nameWithoutExtension
+        // fileName is the path RELATIVE to the notes root ("Folder/Name.note"
+        // inside a folder, "Name.note" at the root), so folders work and
+        // every note still has exactly one unique key.
+        val relative = notesDir.relativize(path).toString().replace('\\', '/')
+        val fileName = relative
+        val folder = relative.substringBeforeLast('/', "")
+            .let { if (it == relative) "" else it }
+        val fallbackTitle = path.fileName.toString().substringBeforeLast('.')
 
         val blocks = mutableListOf<NoteBlock>()
         val references = mutableListOf<NoteReference>()
+        // Titles of other notes linked via `[[Title]]` in this note's text.
+        val links = mutableListOf<String>()
         var title = fallbackTitle
 
         lines.forEach { rawLine ->
-            val line = rawLine.trimEnd()
+            // Hidden alignment / direction markers (\u200B, \u2060, RLM,
+            // LRM) are editor-only styling: strip them before classifying
+            // so a centered `\u200B# Title` still parses as a heading and
+            // its marker never leaks into the block text.
+            val line = stripLeadingMarkers(rawLine.trimEnd())
             if (line.isBlank()) return@forEach
 
             when {
@@ -369,7 +481,27 @@ object NotesRepository {
                 }
 
                 line.startsWith("\"") -> {
-                    parseQuoteLine(line)?.let { blocks.add(it) }
+                    parseQuoteLine(line)?.let { block ->
+                        blocks.add(block)
+                        // Colored quotes can carry a reference behind the
+                        // text (e.g. `"verse"[#hex] $Book&C&V`, written by
+                        // the citation autocomplete) — feed its verse tokens
+                        // into the verse-scoped "Referenced notes" panel
+                        // exactly like inline references in paragraphs.
+                        findReferenceTokens(block.text).forEach { token ->
+                            if (token.chapter != null && token.verse != null) {
+                                references.add(
+                                    NoteReference(
+                                        noteTitle = title,
+                                        book = token.book.trim(),
+                                        chapter = token.chapter,
+                                        verse = token.verse
+                                    )
+                                )
+                            }
+                        }
+                        findNoteLinks(block.text).forEach(links::add)
+                    }
                 }
 
                 line.startsWith("$") -> {
@@ -401,6 +533,10 @@ object NotesRepository {
                             )
                         }
                     }
+                    // Note-to-note links: `[[Title]]` inside a paragraph
+                    // (rendered as a clickable chip in the editor; the
+                    // title is the link target).
+                    findNoteLinks(line).forEach(links::add)
                 }
             }
         }
@@ -410,20 +546,31 @@ object NotesRepository {
             fileName = fileName,
             content = content,
             blocks = blocks,
-            references = references
+            references = references,
+            links = links.distinct(),
+            folder = folder
         )
     }
+
+
+    /** Titles linked from [line] via `[[Title]]` markers. */
+    private fun findNoteLinks(line: String): List<String> =
+        NOTE_LINK_REGEX.findAll(line).map { it.groupValues[1].trim() }.toList()
+
+    private val NOTE_LINK_REGEX = Regex("\\[\\[([^\\]]+)\\]\\]")
 
 
     private fun parseReferenceLine(
         line: String,
         noteTitle: String
     ): ReferenceParseResult? {
-        val match = referenceRegex.matchEntire(line) ?: return null
+        val match = referenceLineRegex.matchEntire(line) ?: return null
         val book = match.groupValues[1].trim()
         val chapter = match.groupValues[2].toIntOrNull()
         val verse = match.groupValues[3].toIntOrNull()
-        val extra = match.groupValues[4].trim().ifBlank { null }
+        // Group 5 is the trailing label — group 4 is the optional
+        // verse-range suffix, which the note model doesn't track.
+        val extra = match.groupValues[5].trim().ifBlank { null }
 
         return when {
             chapter != null && verse != null -> {
@@ -478,7 +625,7 @@ object NotesRepository {
 
 
     private fun parseQuoteLine(line: String): QuoteBlock? {
-        val match = quoteRegex.matchEntire(line) ?: return null
+        val match = coloredQuoteRegex.matchEntire(line) ?: return null
         val text = match.groupValues[1].trim()
         val color = match.groupValues[2].trim().ifBlank { null }
         val trailing = match.groupValues[3].trim()
@@ -494,15 +641,10 @@ object NotesRepository {
         // the regex captures them via `\s*(.*)`.
         val finalText = text + trailing
         return QuoteBlock(depth = 0, text = finalText, colorHex = color)
-    }
-
-
-    private fun extractTitle(content: String): String {
+    }    private fun extractTitle(content: String): String {
         return content.lineSequence()
-            .firstOrNull { it.trimStart().startsWith("# ") }
-            ?.trimStart()
-            ?.removePrefix("# ")
-            ?.trim()
+            .firstOrNull { stripLeadingMarkers(it.trimStart()).startsWith("# ") }
+            ?.let { stripLeadingMarkers(it.trimStart()).removePrefix("# ").trim() }
             .orEmpty()
     }
 
@@ -517,24 +659,182 @@ object NotesRepository {
     }
 
 
+    // ------------------------------------------------------------------
+    // Folders
+    // ------------------------------------------------------------------
+
+    /**
+     * Every notes subfolder (relative path with `/` separators, deepest
+     * first is NOT guaranteed — callers sort as they like). The media
+     * folder is internal and excluded.
+     */
+    fun folders(): List<String> {
+        if (!Files.exists(notesDir)) return emptyList()
+        val mediaName = mediaDir().fileName.toString()
+        return Files.walk(notesDir).use { stream ->
+            stream
+                .filter { path ->
+                    Files.isDirectory(path) && path != notesDir &&
+                        path.fileName.toString() != mediaName
+                }
+                .map { path ->
+                    notesDir.relativize(path).toString().replace('\\', '/')
+                }
+                .sorted()
+                .toList()
+        }
+    }
+
+    /** Notes directly inside [folder] ("" = the root). */
+    fun notesInFolder(folder: String): List<ParsedNote> =
+        listFiles().filter { it.folder == folder }
+
+    /**
+     * A folder path is valid when it stays inside the notes root: no
+     * leading `/`, no OS separators, no `..` segments, no double
+     * separators. `/` alone is the documented nesting separator.
+     */
+    private fun isValidFolderPath(folder: String): Boolean {
+        if (folder.isBlank() || folder.startsWith("/") || folder.contains("\\")) return false
+        val segments = folder.split('/')
+        return segments.none { it.isEmpty() || it == "." || it == ".." }
+    }
+
+    /** Create a folder (relative path, may contain `/` for nesting). */
+    fun createFolder(folder: String): Boolean {
+        if (!isValidFolderPath(folder)) return false
+        val target = notesDir.resolve(folder)
+        return runCatching {
+            Files.createDirectories(target)
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Rename a folder, moving its notes along. Returns false when the
+     *  target name is taken or the source doesn't exist. */
+    fun renameFolder(oldName: String, newName: String): Boolean {
+        if (oldName.isBlank() || newName.isBlank() || oldName == newName) return false
+        if (!isValidFolderPath(newName)) return false
+        val source = notesDir.resolve(oldName)
+        val target = notesDir.resolve(newName)
+        if (!Files.isDirectory(source) || Files.exists(target)) return false
+        return runCatching { Files.move(source, target); true }.getOrDefault(false)
+    }
+
+    /** Delete a folder (only when EMPTY — notes must be moved first). */
+    fun deleteFolder(folder: String): Boolean {
+        val target = notesDir.resolve(folder)
+        if (!Files.isDirectory(target)) return false
+        return runCatching { Files.delete(target); true }.getOrDefault(false)
+    }
+
+    /**
+     * Move a note into [targetFolder] ("" = the root), keeping a unique
+     * file name. Returns the note's new relative fileName, or null when
+     * the note doesn't exist.
+     */
+    fun moveNote(fileName: String, targetFolder: String): String? {
+        val source = notesDir.resolve(fileName)
+        if (!Files.exists(source)) return null
+        val currentFolder = fileName.substringBeforeLast('/', "")
+            .let { if (it == fileName) "" else it }
+        // Moving into the folder it already lives in is a no-op — avoids
+        // a same-path Files.move (which can throw and surface as a bogus
+        // "could not move" error).
+        if (currentFolder == targetFolder) return fileName
+        val baseName = fileName.substringAfterLast('/')
+        var candidate = if (targetFolder.isBlank()) baseName else "$targetFolder/$baseName"
+        var counter = 1
+        while (Files.exists(notesDir.resolve(candidate))) {
+            val stem = baseName.substringBeforeLast('.')
+            val ext = baseName.substringAfterLast('.', "note")
+            candidate = if (targetFolder.isBlank()) {
+                "$stem-$counter.$ext"
+            } else {
+                "$targetFolder/$stem-$counter.$ext"
+            }
+            counter++
+        }
+        val target = notesDir.resolve(candidate)
+        return runCatching {
+            Files.createDirectories(target.parent)
+            Files.move(source, target)
+            invalidateNotes()
+            candidate
+        }.getOrNull()
+    }
+
+
+    // ------------------------------------------------------------------
+    // Import
+    // ------------------------------------------------------------------
+
+    /** Result of importing one note file. */
+    data class ImportResult(
+        val fileName: String?,
+        val title: String,
+        val error: String? = null
+    )
+
+    /**
+     * Import a .note / .txt / .md file as a NEW note — never overwrites an
+     * existing note (a `-1`, `-2`, … suffix keeps every import unique, so
+     * an import is always undoable by deleting the created file). The
+     * file name becomes the title when the content has no `# ` heading.
+     * Returns the created note's file name, or an error message.
+     */
+    fun importNote(source: Path): ImportResult {
+        ensureSeeded()
+        if (!Files.isRegularFile(source)) {
+            return ImportResult(null, source.fileName.toString(), "Not a file")
+        }
+        val ext = source.extension.lowercase()
+        val raw = runCatching { Files.readString(source) }
+            .getOrElse { return ImportResult(null, source.fileName.toString(), "Unreadable file") }
+        if (raw.isBlank()) {
+            return ImportResult(null, source.fileName.toString(), "File is empty")
+        }
+
+        val content = when (ext) {
+            "note" -> raw
+            // Plain text / Markdown: keep the content, deriving a title
+            // from the first `# ` heading or the file name.
+            else -> {
+                val firstHeading = raw.lineSequence()
+                    .firstOrNull { it.trimStart().startsWith("# ") }
+                    ?.trimStart()
+                    ?.removePrefix("# ")
+                    ?.trim()
+                val title = firstHeading ?: source.fileName.toString().substringBeforeLast('.')
+                "# $title\n\n" + raw.trim()
+            }
+        }
+
+        val parsedTitle = extractTitle(content)
+        val safeBase = sanitizeFileName(parsedTitle.ifBlank { source.fileName.toString() })
+        var fileName = "$safeBase.note"
+        var counter = 1
+        while (Files.exists(notesDir.resolve(fileName))) {
+            fileName = "${safeBase}-$counter.note"
+            counter++
+        }
+        return runCatching {
+            Files.writeString(notesDir.resolve(fileName), content.trimEnd() + "\n")
+            invalidateNotes()
+            ImportResult(fileName, parsedTitle)
+        }.getOrElse { e ->
+            ImportResult(null, parsedTitle, e.message ?: "Write failed")
+        }
+    }
+
+
     private data class ReferenceParseResult(
         val block: NoteBlock,
         val reference: NoteReference?
     )
 
 
-    // Three granularities: `$Book`, `$Book&C` and `$Book&C&V` (the
-    // latter optionally followed by a verse-range suffix and / or a
-    // free-text label). Parts are separated by `&` or `$` (the `$` form
-    // is accepted so notes written before the `&` syntax keep parsing);
-    // groups: 1 = book, 2 = chapter, 3 = verse, 4 = label.
-    private val referenceRegex =
-        Regex("^\\$([^\\$&]+)(?:[\\$&](\\d+)(?:[\\$&](\\d+)(?:\\+\\d*|-[\\$&]?\\d+(?:[\\$&]\\d+)?(?:\\+\\d*)?)?(?:\\s+(.*))?)?)?\\s*$")
-
-    private val quoteRegex =
-        Regex("^\"(.+?)\"(?:\\[#([0-9A-Fa-f]{3,8})])?\\s*(.*)$")
-
+    // `- ` bullet markers have no UI-side counterpart (the editor matches
+    // a literal `- `), so this one stays local to the parser.
     private val unorderedListRegex = Regex("^-\\s+")
-
-    private val orderedListRegex = Regex("^\\d+\\.\\s+")
 }

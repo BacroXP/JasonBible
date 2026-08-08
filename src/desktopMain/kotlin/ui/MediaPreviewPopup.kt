@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,16 +39,23 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupPositionProvider
+import data.APP_USER_AGENT
 import data.MediaPreviewFetcher
 import data.MediaPreviewInfo
+import data.MediaProfileInfo
 import data.MediaReferenceToken
 import data.SoundEvent
 import data.SoundManager
+import data.fetchProfileInfo
+import data.isProfile
 import data.readCapped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.LinkedHashMap
 
 
 /**
@@ -103,15 +111,24 @@ internal fun MediaPreviewCard(
 ) {
     val url = token.resolveUrl().orEmpty()
     var info by remember(token) { mutableStateOf<MediaPreviewInfo?>(null) }
+    var profile by remember(token) { mutableStateOf<MediaProfileInfo?>(null) }
     var failed by remember(token) { mutableStateOf(false) }
     var thumbnail by remember(token) { mutableStateOf<ImageBitmap?>(null) }
 
     LaunchedEffect(token) {
-        val fetched = MediaPreviewFetcher.fetch(token)
-        if (fetched == null) failed = true else info = fetched
+        if (token.isProfile) {
+            // Channels / users have no oEmbed — scrape name + avatar the
+            // same way the media panel does, so the popup agrees with it.
+            val fetched = fetchProfileInfo(token)
+            if (fetched == null) failed = true else profile = fetched
+        } else {
+            val fetched = MediaPreviewFetcher.fetch(token)
+            if (fetched == null) failed = true else info = fetched
+        }
     }
-    LaunchedEffect(info) {
+    LaunchedEffect(info, profile) {
         thumbnail = info?.thumbnailUrl?.let { fetchImageBitmap(it) }
+            ?: profile?.avatarUrl?.let { fetchImageBitmap(it) }
     }
 
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -136,7 +153,12 @@ internal fun MediaPreviewCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(token.service.emoji, style = MaterialTheme.typography.titleMedium)
+                Icon(
+                    imageVector = token.service.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = muted
+                )
                 Text(
                     text = token.service.label,
                     style = MaterialTheme.typography.labelLarge,
@@ -174,7 +196,10 @@ internal fun MediaPreviewCard(
                     )
                 }
 
-                info == null -> {
+                // Profile fetches populate `profile` (never `info`), so the
+                // loading state ends only once BOTH are null — otherwise a
+                // profile would sit on "Loading preview…" forever.
+                info == null && profile == null -> {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -192,23 +217,24 @@ internal fun MediaPreviewCard(
                 }
 
                 else -> {
-                    // Local snapshot: `info` is a delegated property, so
-                    // smart-casting `info!!.title` across calls is not
-                    // allowed — capture once and reuse.
-                    val current = info
+                    // Local snapshots: `info` / `profile` are delegated
+                    // properties, so reading them once avoids the
+                    // smart-cast limitation on delegated vars.
+                    val title = profile?.name ?: info?.title
+                    val author = if (profile != null) null else info?.author
                     thumbnail?.let { bmp ->
                         Image(
                             bitmap = bmp,
-                            contentDescription = current?.title,
+                            contentDescription = title,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(140.dp)
                                 .clip(RoundedCornerShape(8.dp))
                         )
                     }
-                    if (!current?.title.isNullOrBlank()) {
+                    if (!title.isNullOrBlank()) {
                         Text(
-                            text = current!!.title,
+                            text = title,
                             style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.SemiBold
                             ),
@@ -216,9 +242,30 @@ internal fun MediaPreviewCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (!current?.author.isNullOrBlank()) {
+                    // Profiles: the scraped verification badge ("✓ Verified"
+                    // / "✓ Official Artist") under the name, like the panel.
+                    profile?.badge?.let { badge ->
+                        VerifiedBadge(
+                            text = badge,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    // Profiles: the scraped follower / subscriber count
+                    // ("1.23M subscribers", "114.6M monthly listeners")
+                    // under the badge, matching the panel's profile card.
+                    profile?.followerCount?.takeIf { it.isNotBlank() }?.let { count ->
                         Text(
-                            text = current!!.author,
+                            text = count,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MediaAccent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    if (!author.isNullOrBlank()) {
+                        Text(
+                            text = author,
                             style = MaterialTheme.typography.bodySmall,
                             color = muted,
                             maxLines = 1,
@@ -246,17 +293,47 @@ internal fun MediaPreviewCard(
 }
 
 
+// ---------------------------------------------------------------------------
+// Network image cache
+//
+// Thumbnails / avatars are re-fetched whenever a note is re-opened, so
+// decoded bitmaps are cached per URL for the app session (access-ordered
+// LRU, capped so a session browsing many links can't grow memory without
+// bound). Images change rarely — a session-stale thumbnail is a fair
+// price for not re-downloading every card on every note switch. Failed
+// fetches are cached as null too, so a dead URL isn't retried on every
+// re-open. Mirrors the data layer's [data.ProfileInfoCache].
+// ---------------------------------------------------------------------------
+private const val MAX_CACHED_IMAGES = 48
+
+private val imageCache =
+    object : LinkedHashMap<String, ImageBitmap?>(32, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, ImageBitmap?>
+        ): Boolean = size > MAX_CACHED_IMAGES
+    }
+
+
 /** Load a thumbnail into an [ImageBitmap] off the UI thread, or null on
  *  any failure (offline, unsupported format, timeout). The response is
- *  capped at 2 MB so a rogue URL can't balloon memory. */
-internal suspend fun fetchImageBitmap(url: String): ImageBitmap? =
-    withContext(Dispatchers.IO) {
+ *  capped at 2 MB so a rogue URL can't balloon memory. Results are
+ *  cached per URL (see [imageCache]) so re-opening a note serves the
+ *  previously decoded bitmap instantly. */
+internal suspend fun fetchImageBitmap(url: String): ImageBitmap? {
+    // Guarded because the cache is a plain LinkedHashMap and this is a
+    // public suspend API that could be called from any dispatcher (all
+    // current callers resume on main, but the guard keeps that an
+    // implementation detail rather than a requirement).
+    if (imageCache.containsKey(url)) {
+        return synchronized(imageCache) { imageCache[url] }
+    }
+    val fetched = withContext(Dispatchers.IO) {
         val conn = runCatching { URL(url).openConnection() }.getOrNull()
             ?: return@withContext null
         conn.connectTimeout = 4000
         conn.readTimeout = 4000
         // Some thumbnail CDNs reject the default Java user-agent.
-        (conn as? HttpURLConnection)?.setRequestProperty("User-Agent", "BibleApp/1.0")
+        (conn as? HttpURLConnection)?.setRequestProperty("User-Agent", APP_USER_AGENT)
         val bytes: ByteArray? = try {
             conn.getInputStream().use { input ->
                 readCapped(input, MAX_THUMBNAIL_BYTES)
@@ -268,5 +345,26 @@ internal suspend fun fetchImageBitmap(url: String): ImageBitmap? =
             runCatching { raw.decodeToImageBitmap() }.getOrNull()
         }
     }
+    synchronized(imageCache) { imageCache[url] = fetched }
+    return fetched
+}
 
 private const val MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
+
+// Local images can legitimately be larger than remote thumbnails, but
+// decoding is capped all the same so a huge / malformed file can't
+// balloon memory.
+private const val MAX_LOCAL_IMAGE_BYTES = 32 * 1024 * 1024
+
+
+/** Load a local image file into an [ImageBitmap] off the UI thread, or
+ *  null on any failure (unsupported format, truncated / unreadable file,
+ *  oversized). Used for embedded `@file:` images in the media panel. */
+internal suspend fun fetchImageBitmapFromFile(path: String): ImageBitmap? =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            Files.newInputStream(Path.of(path)).use { input ->
+                readCapped(input, MAX_LOCAL_IMAGE_BYTES)
+            }.decodeToImageBitmap()
+        }.getOrNull()
+    }

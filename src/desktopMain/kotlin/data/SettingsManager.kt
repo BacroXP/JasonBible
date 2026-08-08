@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.LocalDate
 
 
 @Serializable
@@ -18,6 +19,12 @@ private data class PrivateSettings(
     val starredBooks: List<Int> = emptyList(),
     val starredChapters: List<String> = emptyList(),
     val readChapters: List<String> = emptyList(),
+    // When each chapter was marked read (ISO `yyyy-MM-dd`), for the
+    // reading-statistics activity charts. A chapter appears at most once
+    // (re-marking moves its date); chapters read before this field
+    // existed have no entry and only count toward the totals. Backwards
+    // compatible — old configs simply load an empty list.
+    val readHistory: List<ReadHistoryEntry> = emptyList(),
     val verseMarkers: List<VerseMarker> = emptyList(),
     val lastRead: LastReadRef? = null,
     val soundEffectsEnabled: Boolean = true,
@@ -77,7 +84,33 @@ private data class PrivateSettings(
     val globalSearchWholeWord: Boolean = false,
     // Recently used global search queries (most recent first, capped at
     // [MAX_GLOBAL_SEARCH_RECENTS]), shown in a dropdown on the search icon.
-    val globalSearchRecents: List<String> = emptyList()
+    val globalSearchRecents: List<String> = emptyList(),
+    // App color style: "normal" (default M3 baseline), "saturated"
+    // (vivid high-chroma palette), "gray" (neutral monochrome) or
+    // "custom" (tonal palette derived from [customAccentColor]).
+    // Unknown keys fall back to "normal" in ui.AppColorStyle.fromKey.
+    val colorStyle: String = "normal",
+    // ARGB seed color for the "custom" color style (default: the shared
+    // accent blue [DEFAULT_ACCENT_ARGB]).
+    val customAccentColor: Long = DEFAULT_ACCENT_ARGB,
+    // Personal verse collections (Sammlungen): each has a name, an
+    // optional description, any number of Bible references, optional
+    // notes and optional tags. Stored alongside the other private
+    // settings so collections survive restarts and stay fully offline.
+    val collections: List<CollectionEntry> = emptyList(),
+    // User-created reading plans: name, ISO start date and the ordered
+    // list of book/chapter(/verse) references. Progress reuses the
+    // shared read-chapter tracking; day N of the plan = day N since
+    // [CustomPlan.startDate].
+    val customPlans: List<CustomPlan> = emptyList(),
+    // Optional local reading reminder: enabled flag, the time of day as
+    // minutes after midnight, the plan it belongs to (null = the daily
+    // plan) and the ISO date the reminder was last shown (so it fires
+    // once per day, not on every recomposition). No cloud services.
+    val reminderEnabled: Boolean = false,
+    val reminderTimeMinutes: Int = 7 * 60,
+    val reminderPlanId: String? = null,
+    val lastReminderShown: String = ""
 )
 
 
@@ -97,6 +130,53 @@ data class LastReadRef(
     val chapterNumber: Int,
     val verseNumber: Int? = null
 )
+
+
+/** One reference inside a personal collection or custom reading plan. */
+@Serializable
+data class SavedReference(
+    val bookNumber: Int,
+    val chapter: Int,
+    val verse: Int? = null
+)
+
+
+/** A personal verse collection (Sammlung). */
+@Serializable
+data class CollectionEntry(
+    val id: String,
+    val name: String,
+    val description: String = "",
+    val references: List<SavedReference> = emptyList(),
+    val notes: String = "",
+    val tags: List<String> = emptyList()
+)
+
+
+/** A user-created reading plan (Eigener Leseplan). */
+@Serializable
+data class CustomPlan(
+    val id: String,
+    val name: String,
+    val startDate: String,
+    val references: List<SavedReference> = emptyList(),
+    val durationDays: Int = 365
+)
+
+
+/** One chapter-read event with the date it happened (ISO `yyyy-MM-dd`),
+ *  backing the reading-statistics activity charts. */
+@Serializable
+data class ReadHistoryEntry(
+    val date: String,
+    val book: Int,
+    val chapter: Int
+)
+
+
+/** Default ARGB seed for the CUSTOM color style and the citation blue
+ *  (shared with ui.AppTheme / ui.MediaReferencesPanel / ui.QuoteAutocomplete). */
+const val DEFAULT_ACCENT_ARGB: Long = 0xFF3B82F6L
 
 
 object SettingsManager {
@@ -120,6 +200,10 @@ object SettingsManager {
     private val starredBooksState = mutableStateOf(setOf<Int>())
     private val starredChaptersState = mutableStateOf(setOf<String>())
     private val readChaptersState = mutableStateOf(setOf<String>())
+    // chapter key ("book:chapter") → ISO date it was marked read. Written
+    // in lockstep with readChaptersState so totals and activity always
+    // agree; a chapter that is unread has no entry.
+    private val readHistoryState = mutableStateOf<Map<String, String>>(emptyMap())
     private val verseMarkersState = mutableStateOf<Map<String, VerseMarker>>(emptyMap())
     private val lastReadState = mutableStateOf<LastReadRef?>(null)
     private val soundEffectsEnabledState = mutableStateOf(true)
@@ -140,6 +224,14 @@ object SettingsManager {
     private val globalSearchMatchCaseState = mutableStateOf(false)
     private val globalSearchWholeWordState = mutableStateOf(false)
     private val globalSearchRecentsState = mutableStateOf<List<String>>(emptyList())
+    private val colorStyleState = mutableStateOf("normal")
+    private val customAccentColorState = mutableStateOf(DEFAULT_ACCENT_ARGB)
+    private val collectionsState = mutableStateOf<List<CollectionEntry>>(emptyList())
+    private val customPlansState = mutableStateOf<List<CustomPlan>>(emptyList())
+    private val reminderEnabledState = mutableStateOf(false)
+    private val reminderTimeMinutesState = mutableStateOf(7 * 60)
+    private val reminderPlanIdState = mutableStateOf<String?>(null)
+    private val lastReminderShownState = mutableStateOf("")
 
     private const val MIN_SPLIT_RATIO = 0.2f
     private const val MAX_SPLIT_RATIO = 0.8f
@@ -446,6 +538,35 @@ object SettingsManager {
         }
 
     /**
+     * App color style key — "normal", "saturated", "gray" or "custom".
+     * Resolved to a ColorScheme by ui.AppColorScheme.appColorScheme;
+     * unknown keys are treated as "normal" there, so a stale value from
+     * an older config can never crash the theme build.
+     */
+    var colorStyle: String
+        get() = colorStyleState.value
+        set(value) {
+            if (colorStyleState.value != value) {
+                colorStyleState.value = value
+                save()
+            }
+        }
+
+    /**
+     * ARGB seed color for the "custom" color style. Stored as a Long so
+     * the alpha byte survives JSON round-tripping (an Int would be
+     * negative for opaque colors).
+     */
+    var customAccentColor: Long
+        get() = customAccentColorState.value
+        set(value) {
+            if (customAccentColorState.value != value) {
+                customAccentColorState.value = value
+                save()
+            }
+        }
+
+    /**
      * Record a global search query as recently used: de-duplicates
      * case-insensitively (keeping the newest spelling), moves it to the
      * front and caps the list at [MAX_GLOBAL_SEARCH_RECENTS]. Blank
@@ -458,6 +579,107 @@ object SettingsManager {
             .filter { !it.equals(q, ignoreCase = true) }
         globalSearchRecents = updated.take(MAX_GLOBAL_SEARCH_RECENTS)
     }
+
+    // ------------------------------------------------------------------
+    // Personal collections (Sammlungen)
+    // ------------------------------------------------------------------
+
+    val collections: List<CollectionEntry>
+        get() = collectionsState.value
+
+    fun collection(id: String): CollectionEntry? =
+        collectionsState.value.find { it.id == id }
+
+    fun saveCollection(collection: CollectionEntry) {
+        val updated = collectionsState.value.toMutableList().apply {
+            val index = indexOfFirst { it.id == collection.id }
+            if (index >= 0) this[index] = collection else add(collection)
+        }
+        collectionsState.value = updated
+        save()
+    }
+
+    fun deleteCollection(id: String) {
+        collectionsState.value = collectionsState.value.filterNot { it.id == id }
+        save()
+    }
+
+    /** Collections that contain a verse (canonical book number). */
+    fun collectionsForVerse(bookNumber: Int, chapter: Int, verse: Int): List<CollectionEntry> =
+        collectionsState.value.filter { collection ->
+            collection.references.any {
+                it.bookNumber == bookNumber && it.chapter == chapter &&
+                    (it.verse == null || it.verse == verse)
+            }
+        }
+
+    // ------------------------------------------------------------------
+    // Custom reading plans
+    // ------------------------------------------------------------------
+
+    val customPlans: List<CustomPlan>
+        get() = customPlansState.value
+
+    fun customPlan(id: String): CustomPlan? =
+        customPlansState.value.find { it.id == id }
+
+    fun saveCustomPlan(plan: CustomPlan) {
+        val updated = customPlansState.value.toMutableList().apply {
+            val index = indexOfFirst { it.id == plan.id }
+            if (index >= 0) this[index] = plan else add(plan)
+        }
+        customPlansState.value = updated
+        save()
+    }
+
+    fun deleteCustomPlan(id: String) {
+        customPlansState.value = customPlansState.value.filterNot { it.id == id }
+        save()
+    }
+
+    // ------------------------------------------------------------------
+    // Reading reminder (local, no cloud)
+    // ------------------------------------------------------------------
+
+    var reminderEnabled: Boolean
+        get() = reminderEnabledState.value
+        set(value) {
+            if (reminderEnabledState.value != value) {
+                reminderEnabledState.value = value
+                save()
+            }
+        }
+
+    /** Reminder time as minutes after midnight (0..1439). */
+    var reminderTimeMinutes: Int
+        get() = reminderTimeMinutesState.value
+        set(value) {
+            val clamped = value.coerceIn(0, 1439)
+            if (reminderTimeMinutesState.value != clamped) {
+                reminderTimeMinutesState.value = clamped
+                save()
+            }
+        }
+
+    /** Plan id the reminder belongs to (null = the daily 365-day plan). */
+    var reminderPlanId: String?
+        get() = reminderPlanIdState.value
+        set(value) {
+            if (reminderPlanIdState.value != value) {
+                reminderPlanIdState.value = value
+                save()
+            }
+        }
+
+    /** ISO date the reminder was last shown ("" = never). */
+    var lastReminderShown: String
+        get() = lastReminderShownState.value
+        set(value) {
+            if (lastReminderShownState.value != value) {
+                lastReminderShownState.value = value
+                save()
+            }
+        }
 
     init {
         load()
@@ -511,17 +733,31 @@ object SettingsManager {
                 remove(key)
             }
         }.toSet()
+        readHistoryState.value = readHistoryState.value.toMutableMap().apply {
+            if (read) {
+                put(key, LocalDate.now().toString())
+            } else {
+                remove(key)
+            }
+        }
         save()
     }
 
 
     fun toggleChapterRead(bookNumber: Int, chapterNumber: Int) {
         val key = chapterKey(bookNumber, chapterNumber)
-        readChaptersState.value = readChaptersState.value.toMutableSet().apply {
-            if (!add(key)) {
+        val mutable = readChaptersState.value.toMutableSet()
+        // add returns true when the key was NOT present → now read.
+        val nowRead = mutable.add(key)
+        if (!nowRead) mutable.remove(key)
+        readChaptersState.value = mutable.toSet()
+        readHistoryState.value = readHistoryState.value.toMutableMap().apply {
+            if (nowRead) {
+                put(key, LocalDate.now().toString())
+            } else {
                 remove(key)
             }
-        }.toSet()
+        }
         save()
     }
 
@@ -529,6 +765,22 @@ object SettingsManager {
     fun readChapterCount(): Int {
         return readChaptersState.value.size
     }
+
+
+    /**
+     * Every chapter-read event with its date, sorted chronologically.
+     * Feeds the reading-statistics activity charts; the totals continue
+     * to come from [readChapterCount] so pre-history chapters still
+     * count toward the progress bars.
+     */
+    fun readHistoryEntries(): List<ReadHistoryEntry> =
+        readHistoryState.value.map { (key, date) ->
+            ReadHistoryEntry(
+                date = date,
+                book = key.substringBefore(':').toIntOrNull() ?: 0,
+                chapter = key.substringAfter(':').toIntOrNull() ?: 0
+            )
+        }.sortedWith(compareBy({ it.date }, { it.book }, { it.chapter }))
 
 
     fun readChaptersInRange(bookNumbers: Set<Int>): Int {
@@ -627,6 +879,9 @@ object SettingsManager {
         starredBooksState.value = settings.starredBooks.toSet()
         starredChaptersState.value = settings.starredChapters.toSet()
         readChaptersState.value = settings.readChapters.toSet()
+        readHistoryState.value = settings.readHistory.associate {
+            chapterKey(it.book, it.chapter) to it.date
+        }
         verseMarkersState.value = settings.verseMarkers.associateBy { verseKey(
             it.book,
             it.chapter,
@@ -658,6 +913,14 @@ object SettingsManager {
         globalSearchMatchCaseState.value = settings.globalSearchMatchCase
         globalSearchWholeWordState.value = settings.globalSearchWholeWord
         globalSearchRecentsState.value = settings.globalSearchRecents
+        colorStyleState.value = settings.colorStyle
+        customAccentColorState.value = settings.customAccentColor
+        collectionsState.value = settings.collections
+        customPlansState.value = settings.customPlans
+        reminderEnabledState.value = settings.reminderEnabled
+        reminderTimeMinutesState.value = settings.reminderTimeMinutes.coerceIn(0, 1439)
+        reminderPlanIdState.value = settings.reminderPlanId
+        lastReminderShownState.value = settings.lastReminderShown
     }
 
 
@@ -676,6 +939,17 @@ object SettingsManager {
                         starredBooks = starredBooksState.value.sorted(),
                         starredChapters = starredChaptersState.value.sorted(),
                         readChapters = readChaptersState.value.sorted(),
+                        readHistory = readHistoryState.value.map { (key, date) ->
+                            ReadHistoryEntry(
+                                date = date,
+                                book = key.substringBefore(':').toIntOrNull() ?: 0,
+                                chapter = key.substringAfter(':').toIntOrNull() ?: 0
+                            )
+                        }.sortedWith(
+                            compareBy<ReadHistoryEntry> { it.date }
+                                .thenBy { it.book }
+                                .thenBy { it.chapter }
+                        ),
                         verseMarkers = verseMarkersState.value.values
                             .sortedWith(
                                 compareBy<VerseMarker> { it.book }
@@ -700,7 +974,15 @@ object SettingsManager {
                         globalSearchQuery = globalSearchQueryState.value,
                         globalSearchMatchCase = globalSearchMatchCaseState.value,
                         globalSearchWholeWord = globalSearchWholeWordState.value,
-                        globalSearchRecents = globalSearchRecentsState.value
+                        globalSearchRecents = globalSearchRecentsState.value,
+                        colorStyle = colorStyleState.value,
+                        customAccentColor = customAccentColorState.value,
+                        collections = collectionsState.value,
+                        customPlans = customPlansState.value,
+                        reminderEnabled = reminderEnabledState.value,
+                        reminderTimeMinutes = reminderTimeMinutesState.value,
+                        reminderPlanId = reminderPlanIdState.value,
+                        lastReminderShown = lastReminderShownState.value
                     )
                 )
             )

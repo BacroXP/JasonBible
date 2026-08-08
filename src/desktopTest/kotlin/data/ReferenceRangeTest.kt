@@ -251,7 +251,8 @@ class ReferenceRangeTest {
             primary = Color.Blue,
             tertiary = Color.Cyan,
             faded = Color.DarkGray,
-            referenceBackground = Color.LightGray
+            referenceBackground = Color.LightGray,
+            noteLinkBackground = Color.Cyan.copy(alpha = 0.2f)
         )
     )
 

@@ -4,8 +4,6 @@ import java.io.File
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.Clip
 import javax.sound.sampled.FloatControl
-import javax.sound.sampled.LineUnavailableException
-import javax.sound.sampled.UnsupportedAudioFileException
 
 
 /**
@@ -132,7 +130,4 @@ object SoundManager {
     @Suppress("unused")
     fun debugPoolSize(event: SoundEvent): Int = pool[event]?.size ?: 0
 
-
-    @Suppress("unused")
-    private fun ignoredCauseForLinter(): Pair<UnsupportedAudioFileException, LineUnavailableException>? = null
 }

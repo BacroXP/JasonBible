@@ -68,6 +68,9 @@ internal fun EditorToolbar(
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onToggleOrientation: () -> Unit,
+    onAlignLeft: () -> Unit,
+    onAlignCenter: () -> Unit,
+    onAlignRight: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onCopy: () -> Unit,
     onCut: () -> Unit,
@@ -75,6 +78,7 @@ internal fun EditorToolbar(
     onToggleFind: () -> Unit,
     onSelectAll: () -> Unit,
     onRemoveColor: () -> Unit,
+    onOpenColorPicker: () -> Unit,
     onClearFormatting: () -> Unit,
     /**
      * Open the Bible-reference picker dialog pre-set to the given
@@ -98,6 +102,8 @@ internal fun EditorToolbar(
     val canClip = !editorValue.selection.collapsed
     // Paragraph style at the caret, mirrored in the Styles dropdown.
     val currentStyle = currentBlockStyle(editorValue)
+    // Paragraph alignment at the caret, mirrored in the Alignment group.
+    val currentAlignment = currentLineAlignment(editorValue)
     // Which ribbon tab is expanded. Word remembers the last tab; this
     // keeps the user's choice for the lifetime of the editor screen.
     var selectedTab by remember { mutableStateOf(RibbonTab.HOME) }
@@ -162,6 +168,15 @@ internal fun EditorToolbar(
                         }
                         // Word's "No colour": strips [#hex] markers, keeps the quote.
                         NoColorDot(tooltip = "Remove highlight color", onClick = onRemoveColor)
+                        // Custom color: rainbow dot opens the color picker
+                        // dialog; the chosen color is applied to the
+                        // selection / cursor line like any preset dot.
+                        ToolbarTip(label = "Custom color…", shortcut = null) {
+                            RainbowDot(
+                                modifier = Modifier.size(20.dp),
+                                onClick = onOpenColorPicker
+                            )
+                        }
                     }
                     ToolbarDivider(dividerColor)
 
@@ -245,8 +260,38 @@ internal fun EditorToolbar(
                     }
                     ToolbarDivider(dividerColor)
 
+                    ToolbarGroup("Alignment") {
+                        ToolbarActionButton(
+                            icon = RibbonIcons.AlignLeft,
+                            accent = currentAlignment == LineAlignment.LEFT,
+                            tooltip = "Align left",
+                            shortcut = "Ctrl+L",
+                            onClick = onAlignLeft
+                        )
+                        ToolbarActionButton(
+                            icon = RibbonIcons.AlignCenter,
+                            accent = currentAlignment == LineAlignment.CENTER,
+                            tooltip = "Align center",
+                            shortcut = "Ctrl+E",
+                            onClick = onAlignCenter
+                        )
+                        ToolbarActionButton(
+                            icon = RibbonIcons.AlignRight,
+                            accent = currentAlignment == LineAlignment.RIGHT,
+                            tooltip = "Align right",
+                            shortcut = "Ctrl+R",
+                            onClick = onAlignRight
+                        )
+                    }
+                    ToolbarDivider(dividerColor)
+
                     ToolbarGroup("Direction") {
-                        ToolbarActionButton(icon = RibbonIcons.Direction, accent = true, tooltip = "Toggle text direction", shortcut = "Ctrl+E", onClick = onToggleOrientation)
+                        ToolbarActionButton(
+                            icon = RibbonIcons.Direction,
+                            accent = true,
+                            tooltip = "Toggle text direction (LTR / RTL)",
+                            onClick = onToggleOrientation
+                        )
                     }
                 }
             }

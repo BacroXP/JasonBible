@@ -21,6 +21,21 @@ kotlin {
 
         val desktopMain by getting {
 
+            // In-app media player: an embedded JavaFX WebView hosts each
+            // service's official embed (YouTube iframe / Vimeo player /
+            // SoundCloud widget / Spotify embed) in a small always-on-top
+            // window, with play-progress reported back to the media cards.
+            // The per-OS classifier jars carry the native libraries, so
+            // every installer bundles exactly its own platform's binaries;
+            // the classifier is derived from the BUILD host's OS. Version
+            // 25 matches the JDK 25 runtime this project targets.
+            val javafxVersion = "25.0.2"
+            val fxClassifier = when {
+                System.getProperty("os.name").lowercase().contains("mac") -> "mac"
+                System.getProperty("os.name").lowercase().contains("win") -> "win"
+                else -> "linux"
+            }
+
             dependencies {
 
                 // Compose
@@ -28,6 +43,19 @@ kotlin {
 
                 // Material 3
                 implementation("org.jetbrains.compose.material3:material3:1.9.0")
+
+                // JavaFX (embedded media player) — plain jars for the
+                // classes, classifier jars for the native libs.
+                implementation("org.openjfx:javafx-base:$javafxVersion")
+                implementation("org.openjfx:javafx-base:$javafxVersion:$fxClassifier")
+                implementation("org.openjfx:javafx-graphics:$javafxVersion")
+                implementation("org.openjfx:javafx-graphics:$javafxVersion:$fxClassifier")
+                implementation("org.openjfx:javafx-controls:$javafxVersion")
+                implementation("org.openjfx:javafx-controls:$javafxVersion:$fxClassifier")
+                implementation("org.openjfx:javafx-media:$javafxVersion")
+                implementation("org.openjfx:javafx-media:$javafxVersion:$fxClassifier")
+                implementation("org.openjfx:javafx-web:$javafxVersion")
+                implementation("org.openjfx:javafx-web:$javafxVersion:$fxClassifier")
 
                 // JSON
                 implementation(
@@ -73,6 +101,28 @@ compose.desktop {
         jvmArgs("--enable-native-access=ALL-UNNAMED")
 
         nativeDistributions {
+
+            // JavaFX WebView (the in-app media player) is NOT fully
+            // detected by the plugin's automatic jlink module analysis:
+            // WebKit pulls in java.net.http and other JDK modules
+            // dynamically at runtime. Without them the packaged app fails
+            // with a NoClassDefFoundError (network stack) or a native
+            // SIGSEGV inside libjfxwebkit's twkExecuteScript (missing
+            // class during JNI GetMethodID) — media then never plays and
+            // the JavaFX Application Thread dies. `modules` ADDS to the
+            // auto-computed jlink list (see Compose docs); this is the
+            // module set JavaFX WebView needs on top of what the plugin
+            // already detects (java.desktop, java.logging, java.xml, …).
+            modules(
+                "java.net.http",
+                "java.management",
+                "java.naming",
+                "java.scripting",
+                "java.security.jgss",
+                "java.sql",
+                "jdk.jsobject",
+                "jdk.unsupported"
+            )
 
             targetFormats(
                 TargetFormat.Deb,

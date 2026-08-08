@@ -453,7 +453,11 @@ private fun buildStrongsText(
 internal fun WordStudyPanel(
     token: StudyWordToken,
     loaded: Boolean,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    /** Opens the central lexicon at [String] (a Strong's number). Wired
+     *  by the host screen; defaults to a no-op so existing call sites
+     *  compile unchanged. */
+    onOpenLexicon: (String) -> Unit = {}
 ) {
     val definition = if (loaded) StrongsRepository.definition(token.number) else null
 
@@ -500,6 +504,19 @@ internal fun WordStudyPanel(
                             onClose()
                         }
                         .padding(horizontal = 4.dp)
+                )
+            }
+
+            // Link into the central word-study / lexicon view.
+            if (loaded) {
+                Text(
+                    text = "Open in Word Study →",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable {
+                        SoundManager.play(SoundEvent.Click)
+                        onOpenLexicon(token.number)
+                    }
                 )
             }
 
@@ -589,7 +606,11 @@ internal fun WordStudyPanel(
 internal fun WordStudyMiniPanel(
     token: StudyWordToken,
     loaded: Boolean,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    /** Opens the central lexicon at [String] (a Strong's number). Wired
+     *  by the host screen; defaults to a no-op so existing call sites
+     *  compile unchanged. */
+    onOpenLexicon: (String) -> Unit = {}
 ) {
     val definition = if (loaded) StrongsRepository.definition(token.number) else null
 
@@ -642,6 +663,17 @@ internal fun WordStudyMiniPanel(
                         }
                         .padding(horizontal = 4.dp)
                 )
+                if (loaded) {
+                    Text(
+                        text = "Word Study →",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            SoundManager.play(SoundEvent.Click)
+                            onOpenLexicon(token.number)
+                        }
+                    )
+                }
             }
 
             when {

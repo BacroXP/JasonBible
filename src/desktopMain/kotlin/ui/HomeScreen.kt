@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
@@ -85,6 +89,9 @@ internal fun pickDailyVerse(books: List<Book>, seed: Long): DailyVerse? {
 fun HomeScreen(
     openBible: () -> Unit,
     openNotes: () -> Unit,
+    openStatistics: () -> Unit,
+    openLexicon: () -> Unit,
+    openCollections: () -> Unit,
     openSettings: () -> Unit,
     openQuit: () -> Unit,
     onOpenVerse: (BibleReferenceSelection) -> Unit
@@ -167,10 +174,18 @@ fun HomeScreen(
                     },
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "\uD83D\uDD0D Search the Bible",
-                    style = MaterialTheme.typography.headlineMedium
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = RibbonIcons.Find,
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Text(
+                        text = "Search the Bible",
+                        style = MaterialTheme.typography.headlineMedium,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
                 // The bar and results bind straight to the shared state,
                 // so their wiring can't drift from the Bible pane's.
                 // showScope is hidden on Home: there is no open
@@ -211,10 +226,19 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
                 modifier = Modifier.padding(24.dp)
             ) {
-                Text(
-                    text = "📖 Daily Verse",
-                    style = MaterialTheme.typography.headlineMedium
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = RibbonIcons.Bible,
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Daily Verse",
+                        style = MaterialTheme.typography.headlineMedium,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
 
                 Card {
                     val verse = dailyVerse
@@ -285,45 +309,19 @@ fun HomeScreen(
                     }
                 }
 
-                Button(
-                    onClick = {
-                        SoundManager.play(SoundEvent.Click)
-                        openBible()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Bible")
-                }
+                HomeNavButton(icon = RibbonIcons.Bible, label = "Bible") { openBible() }
 
-                Button(
-                    onClick = {
-                        SoundManager.play(SoundEvent.Click)
-                        openNotes()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Notes")
-                }
+                HomeNavButton(icon = RibbonIcons.Notes, label = "Notes") { openNotes() }
 
-                Button(
-                    onClick = {
-                        SoundManager.play(SoundEvent.Click)
-                        openSettings()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Settings")
-                }
+                HomeNavButton(icon = RibbonIcons.Statistics, label = "Statistics") { openStatistics() }
 
-                Button(
-                    onClick = {
-                        SoundManager.play(SoundEvent.Click)
-                        openQuit()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Quit")
-                }
+                HomeNavButton(icon = RibbonIcons.WordStudy, label = "Word Study") { openLexicon() }
+
+                HomeNavButton(icon = RibbonIcons.Collections, label = "Collections") { openCollections() }
+
+                HomeNavButton(icon = RibbonIcons.Settings, label = "Settings") { openSettings() }
+
+                HomeNavButton(icon = RibbonIcons.Quit, label = "Quit") { openQuit() }
             }
         }
 
@@ -332,9 +330,41 @@ fun HomeScreen(
             // (chapters read / total), and a one-tap "mark today read".
             ReadingPlanCard(
                 books = planBooks,
-                onOpenVerse = onOpenVerse
+                onOpenVerse = onOpenVerse,
+                onOpenStatistics = openStatistics
             )
         }
+    }
+}
+
+
+/**
+ * One full-width Home navigation button: a custom vector icon beside the
+ * label, with the standard click sound. All seven Home destinations use
+ * this, so the row of buttons shares one visual language.
+ */
+@Composable
+private fun HomeNavButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = {
+            SoundManager.play(SoundEvent.Click)
+            onClick()
+        },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
+        Text(
+            text = label,
+            modifier = Modifier.padding(start = 8.dp)
+        )
     }
 }
 
@@ -348,7 +378,8 @@ fun HomeScreen(
 @Composable
 private fun ReadingPlanCard(
     books: List<Book>,
-    onOpenVerse: (BibleReferenceSelection) -> Unit
+    onOpenVerse: (BibleReferenceSelection) -> Unit,
+    onOpenStatistics: () -> Unit
 ) {
     val today = LocalDate.now()
     val day = ReadingPlan.planDay(today)
@@ -370,10 +401,19 @@ private fun ReadingPlanCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.padding(20.dp)
         ) {
-            Text(
-                text = "\uD83D\uDCC5 Reading Plan",
-                style = MaterialTheme.typography.headlineSmall
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = RibbonIcons.Date,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Reading Plan",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
             Text(
                 text = "Day ${day + 1} of ${ReadingPlan.PLAN_DAYS}",
                 style = MaterialTheme.typography.labelLarge,
@@ -446,6 +486,15 @@ private fun ReadingPlanCard(
                             assignments.forEach { (bn, cn) ->
                                 SettingsManager.setChapterRead(bn, cn, !allRead)
                             }
+                        }
+                    )
+                    Text(
+                        text = "View statistics →",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            SoundManager.play(SoundEvent.Click)
+                            onOpenStatistics()
                         }
                     )
                 }

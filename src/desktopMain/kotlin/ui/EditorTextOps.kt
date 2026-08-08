@@ -113,21 +113,31 @@ internal fun prefixSelectedLines(current: TextFieldValue, prefix: String): TextF
     val start = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
     val end = maxOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
 
+    // Prefixes go AFTER any leading alignment/direction markers so a
+    // centered line stays centered when it becomes a heading (`\u200B# …`
+    // rather than `# \u200B…`, which would mis-parse the heading).
+    fun applyToLine(line: String): String {
+        if (line.isBlank()) return line
+        val markers = leadingMarkers(line)
+        return markers + prefix + stripLeadingMarkers(line)
+    }
+
     if (start == end) {
         val lineStart = current.text.lastIndexOf('\n', start - 1).let { if (it < 0) 0 else it + 1 }
+        val line = current.text.substring(lineStart)
+        val newLine = applyToLine(line)
         val newText = buildString {
             append(current.text.substring(0, lineStart))
-            append(prefix)
-            append(current.text.substring(lineStart))
+            append(newLine)
         }
+        // The prefix is inserted after any leading markers, always
+        // shifting the caret by exactly the prefix length.
         val cursor = start + prefix.length
         return current.copy(text = newText, selection = TextRange(cursor, cursor))
     }
 
     val block = current.text.substring(start, end)
-    val prefixed = block.lines().joinToString("\n") { line ->
-        if (line.isBlank()) line else prefix + line
-    }
+    val prefixed = block.lines().joinToString("\n", transform = ::applyToLine)
     val newText = buildString {
         append(current.text.substring(0, start))
         append(prefixed)
@@ -159,9 +169,7 @@ internal fun currentBlockStyle(current: TextFieldValue): NoteStyle {
     val caret = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
     val lineStart = current.text.lastIndexOf('\n', caret - 1).let { if (it < 0) 0 else it + 1 }
     val lineEnd = current.text.indexOf('\n', caret).let { if (it < 0) current.text.length else it }
-    val line = current.text.substring(lineStart, lineEnd)
-        .removePrefix(RLM)
-        .removePrefix(LRM)
+    val line = stripLeadingMarkers(current.text.substring(lineStart, lineEnd))
     return when {
         line.startsWith("## ") -> NoteStyle.H2
         line.startsWith("# ") -> NoteStyle.H1
@@ -179,16 +187,12 @@ internal fun currentBlockStyle(current: TextFieldValue): NoteStyle {
  * (re-applying the same style never stacks prefixes).
  */
 private fun stripBlockPrefix(line: String): String {
-    // Preserve an RTL/LTR direction marker (RLM/LRM) that may sit in
-    // front of the block prefix, e.g. RLM + "# text" from toggling the
-    // line orientation on a heading. The marker is re-appended after the
-    // prefix is stripped so applying a style keeps the line's direction.
-    val directionMarker = when {
-        line.startsWith(RLM) -> RLM
-        line.startsWith(LRM) -> LRM
-        else -> ""
-    }
-    var result = if (directionMarker.isNotEmpty()) line.removePrefix(directionMarker) else line
+    // Preserve the leading alignment + direction markers (e.g.
+    // CENTER + RLM + "# text") that may sit in front of the block
+    // prefix — the markers are re-appended after the prefix is stripped
+    // so applying a style keeps the line's alignment and direction.
+    val markers = leadingMarkers(line)
+    var result = stripLeadingMarkers(line)
 
     if (result.startsWith("## ")) result = result.removePrefix("## ")
     else if (result.startsWith("# ")) result = result.removePrefix("# ")
@@ -203,7 +207,7 @@ private fun stripBlockPrefix(line: String): String {
 
     orderedListRegex.matchAt(result, 0)?.let { result = result.drop(it.value.length) }
 
-    return directionMarker + result
+    return markers + result
 }
 
 
@@ -268,7 +272,9 @@ internal fun toggleColoredQuote(current: TextFieldValue, colorHex: String): Text
 /**
  * Toggles the orientation marker for the cursor line. Default is LTR (no
  * marker). Clicking on an LTR line prepends an RLM (RTL); clicking again
- * removes it (back to LTR). LRM markers are also stripped on click.
+ * removes it (back to LTR). LRM markers are also stripped on click. The
+ * leading alignment marker (if any) is preserved, so a centered line
+ * stays centered when its direction toggles.
  */
 internal fun toggleLineOrientation(current: TextFieldValue): TextFieldValue {
     val start = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
@@ -276,11 +282,14 @@ internal fun toggleLineOrientation(current: TextFieldValue): TextFieldValue {
     val lineEnd = current.text.indexOf('\n', lineStart).let { if (it < 0) current.text.length else it }
     val line = current.text.substring(lineStart, lineEnd)
 
-    val newLine = when {
-        line.startsWith(RLM) -> line.removePrefix(RLM)
-        line.startsWith(LRM) -> line.removePrefix(LRM)
-        else -> RLM + line
+    val alignment = alignmentMarkerOf(line)
+    val directionPart = if (alignment.isNotEmpty()) line.removePrefix(alignment) else line
+    val newDirectionPart = when {
+        directionPart.startsWith(RLM) -> directionPart.removePrefix(RLM)
+        directionPart.startsWith(LRM) -> directionPart.removePrefix(LRM)
+        else -> RLM + directionPart
     }
+    val newLine = alignment + newDirectionPart
     val newText = buildString {
         append(current.text.substring(0, lineStart))
         append(newLine)
@@ -297,15 +306,16 @@ internal fun toggleLineOrientation(current: TextFieldValue): TextFieldValue {
  * Unlike [toggleLineOrientation] (which cycles LTR ↔ RTL), this always
  * sets the direction to exactly what the caller asked for — keyed
  * shortcuts Ctrl+L (force-LTR) / Ctrl+R (force-RTL) reuse this so a
- * re-press lands on the same state.
+ * re-press lands on the same state. A leading alignment marker is kept.
  */
 internal fun forceLineOrientation(current: TextFieldValue, wantRtl: Boolean): TextFieldValue {
     val start = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
     val lineStart = current.text.lastIndexOf('\n', start - 1).let { if (it < 0) 0 else it + 1 }
     val lineEnd = current.text.indexOf('\n', lineStart).let { if (it < 0) current.text.length else it }
     val line = current.text.substring(lineStart, lineEnd)
-    val stripped = line.removePrefix(RLM).removePrefix(LRM)
-    val newLine = if (wantRtl) RLM + stripped else stripped
+    val alignment = alignmentMarkerOf(line)
+    val stripped = stripLeadingMarkers(line)
+    val newLine = alignment + (if (wantRtl) RLM + stripped else stripped)
     val newText = buildString {
         append(current.text.substring(0, lineStart))
         append(newLine)
@@ -314,6 +324,86 @@ internal fun forceLineOrientation(current: TextFieldValue, wantRtl: Boolean): Te
     val cursorDelta = newLine.length - line.length
     val newCursor = (start + cursorDelta).coerceIn(lineStart, newText.length)
     return current.copy(text = newText, selection = TextRange(newCursor, newCursor))
+}
+
+// ---------------------------------------------------------------------------
+// Paragraph alignment (left / center / right)
+//
+// Real visual alignment, stored as an invisible leading marker per line:
+// CENTER = \u200B (zero width space), RIGHT = \u2060 (word joiner), LEFT =
+// the absence of both. The visual transformation strips the marker and
+// applies ParagraphStyle.textAlign to the line, so the text field lays
+// the paragraph out aligned. Toggling the same alignment again returns
+// the line to left (Word-style), while LEFT always strips any marker.
+// ---------------------------------------------------------------------------
+
+/**
+ * Alignment of the line holding the caret (or the start of a
+ * multi-line selection), for mirroring in the toolbar buttons.
+ */
+internal fun currentLineAlignment(current: TextFieldValue): LineAlignment {
+    val caret = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
+    val lineStart = current.text.lastIndexOf('\n', caret - 1).let { if (it < 0) 0 else it + 1 }
+    val lineEnd = current.text.indexOf('\n', caret).let { if (it < 0) current.text.length else it }
+    val line = current.text.substring(lineStart, lineEnd)
+    return when {
+        line.startsWith(ALIGN_CENTER) -> LineAlignment.CENTER
+        line.startsWith(ALIGN_RIGHT) -> LineAlignment.RIGHT
+        else -> LineAlignment.LEFT
+    }
+}
+
+/**
+ * Apply [alignment] to the cursor line — or every line of the
+ * selection. CENTER / RIGHT toggle (re-applying returns the line to
+ * left); LEFT always strips any center/right marker. The marker goes
+ * FIRST, before any block prefix / direction marker, so the line keeps
+ * its heading / quote / direction classification.
+ */
+internal fun toggleLineAlignment(current: TextFieldValue, alignment: LineAlignment): TextFieldValue {
+    val start = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
+    val end = maxOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
+
+    val from: Int
+    val to: Int
+    if (start == end) {
+        from = current.text.lastIndexOf('\n', start - 1).let { if (it < 0) 0 else it + 1 }
+        to = current.text.indexOf('\n', start).let { if (it < 0) current.text.length else it }
+    } else {
+        from = start
+        to = end
+    }
+
+    val affected = current.text.substring(from, to)
+    val realigned = affected.lines().joinToString("\n") { line ->
+        if (line.isBlank()) line else alignLine(line, alignment)
+    }
+    if (realigned == affected) return current
+
+    val newText = buildString {
+        append(current.text.substring(0, from))
+        append(realigned)
+        append(current.text.substring(to))
+    }
+    val newEnd = from + realigned.length
+    val newSelection = if (start == end) {
+        TextRange(newEnd.coerceIn(0, newText.length))
+    } else {
+        TextRange(from, newEnd.coerceIn(from, newText.length))
+    }
+    return current.copy(text = newText, selection = newSelection)
+}
+
+private fun alignLine(line: String, alignment: LineAlignment): String {
+    // Strip any existing alignment marker, then re-apply the requested
+    // one (LEFT = no marker). Direction markers are left untouched —
+    // alignment and direction are independent.
+    val stripped = line.removePrefix(ALIGN_CENTER).removePrefix(ALIGN_RIGHT)
+    return when (alignment) {
+        LineAlignment.LEFT -> stripped
+        LineAlignment.CENTER -> if (line.startsWith(ALIGN_CENTER)) stripped else ALIGN_CENTER + stripped
+        LineAlignment.RIGHT -> if (line.startsWith(ALIGN_RIGHT)) stripped else ALIGN_RIGHT + stripped
+    }
 }
 // ---------------------------------------------------------------------------
 // Word-style "Clear Formatting"
@@ -362,7 +452,9 @@ private fun stripMarkdownFormatting(text: String): String {
         .replace(INLINE_UNDER, "$1")
         .replace(INLINE_ITALIC, "$1")
     return noInline.lines().joinToString("\n") { line ->
-        var l = line
+        // Alignment markers are editor-only styling: clear formatting
+        // drops them (Word's eraser clears alignment too).
+        var l = line.removePrefix(ALIGN_CENTER).removePrefix(ALIGN_RIGHT)
         // `"quote"[#hex]` → `quote` (colour AND quote markers removed).
         l = l.replace(Regex("^\"(.*?)\"\\[(?:#[0-9A-Fa-f]{3,8})](.*)$")) { m ->
             (m.groupValues[1].trim() + " " + m.groupValues[2].trim()).trim()

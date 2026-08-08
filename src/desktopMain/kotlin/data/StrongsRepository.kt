@@ -84,6 +84,12 @@ object StrongsRepository {
 
     fun definition(number: String): StrongsDefinition? = cache?.get(number)
 
+    /** Every loaded definition, for searches over the whole concordance
+     *  (the lexicon's number / transliteration / root / word search).
+     *  Empty until [ensureLoaded] completes. */
+    fun allDefinitions(): Collection<StrongsDefinition> =
+        cache?.values ?: emptyList()
+
     private fun load(): Map<String, StrongsDefinition> {
         val stream = (object {}).javaClass.classLoader
             .getResourceAsStream("bible/Extras/strongs_definitions.json")

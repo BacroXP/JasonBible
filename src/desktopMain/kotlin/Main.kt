@@ -1,7 +1,5 @@
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,6 +30,15 @@ import ui.SplashScreen
 private const val MIN_SPLASH_MILLIS = 900L
 
 fun main() = application {
+    // Single exit path for the window's ✕ and the in-app Quit action:
+    // tear down the JavaFX media-player toolkit first (its thread is
+    // non-daemon, so the JVM would hang without Platform.exit), then
+    // leave the Compose application.
+    fun quitApp() {
+        ui.MediaPlayerController.dispose()
+        exitApplication()
+    }
+
     val windowState = rememberWindowState(
         placement = if (SettingsManager.fullScreen) {
             // "Standard" fullscreen: a maximized window with the normal
@@ -58,13 +65,14 @@ fun main() = application {
 
     Window(
         state = windowState,
-        onCloseRequest = ::exitApplication,
+        onCloseRequest = { quitApp() },
         title = "Bible App",
         // Window / taskbar icon on Linux & Windows. Loaded from the bundled
-        // `src/desktopMain/resources/icons/Icon.png` (512px, generated from
-        // the 1254px master via Icon-256.png / Icon-512.png siblings); on
-        // macOS the Dock icon is set via `iconFile` in build.gradle.kts
-        // instead (per-window icons are not supported there).
+        // `src/desktopMain/resources/icons/Icon.png` (512px master; the
+        // Icon-256.png / Icon-512.png siblings and the icon.ico / icon.icns
+        // installer icons are generated from it); on macOS the Dock icon is
+        // set via `iconFile` in build.gradle.kts instead (per-window icons
+        // are not supported there).
         icon = painterResource("icons/Icon.png"),
         onPreviewKeyEvent = { event -> windowKeyHandler(event) }
     ) {
@@ -81,12 +89,17 @@ fun main() = application {
             }
         }
 
+        // The color scheme follows the persisted color style (Normal /
+        // Saturated / Gray / Custom) as well as the dark-mode toggle.
+        // ui.AppColorStyle resolves the style key and derives a tonal
+        // palette for the non-default styles, so changing either setting
+        // re-themes the whole window instantly.
         MaterialTheme(
-            colorScheme = if (SettingsManager.darkMode) {
-                darkColorScheme()
-            } else {
-                lightColorScheme()
-            }
+            colorScheme = ui.appColorScheme(
+                dark = SettingsManager.darkMode,
+                style = ui.AppColorStyle.fromKey(SettingsManager.colorStyle),
+                customAccent = SettingsManager.customAccentColor
+            )
         ) {
 
             Surface(
@@ -133,7 +146,7 @@ fun main() = application {
 
                 if (appReady) {
                     Navigation(
-                        quit = ::exitApplication,
+                        quit = { quitApp() },
                         registerWindowKeyHandler = { handler ->
                             windowKeyHandler = handler
                         }
@@ -141,6 +154,26 @@ fun main() = application {
                 } else {
                     SplashScreen(progress = startupProgress)
                 }
+
+                // TEMPORARY DEBUG HOOK (will be reverted): auto-play media
+                // tokens on startup when -Ddebug.autoplay="a|b|c" is set.
+                LaunchedEffect(appReady) {
+                    if (!appReady) return@LaunchedEffect
+                    val spec = System.getProperty("debug.autoplay") ?: return@LaunchedEffect
+                    val tokens = spec.split('|').mapNotNull { piece ->
+                        val service = data.MediaService.forKey(piece.substringBefore(':')) ?: return@mapNotNull null
+                        val content = piece.substringAfter(':', "").ifBlank { return@mapNotNull null }
+                        data.MediaReferenceToken(service, content, 0, 0)
+                    }
+                    delay(1500)
+                    tokens.forEachIndexed { index, token ->
+                        System.err.println("[DEBUG-AUTOPLAY] playing #$index ${token.service} ${token.content}")
+                        ui.MediaPlayerController.play(token, "Debug autoplay #$index")
+                        delay(15000)
+                    }
+                }
+
+
             }
         }
     }

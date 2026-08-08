@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -28,6 +29,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import data.BibleRepository
 import data.SoundEvent
 import data.SoundManager
+import data.findMatchIn
 import kotlinx.coroutines.delay
 import model.Book
 
@@ -109,34 +112,8 @@ internal const val MAX_BIBLE_SEARCH_RESULTS = 300
 // searches like `G5656` work too).
 private val STRONGS_QUERY = Regex("^[GH]\\d+$", RegexOption.IGNORE_CASE)
 
-// True when a match starting at [index] in [text] is a whole word — the
-// characters immediately before and after it are not letters or digits,
-// so "day" matches in "a day of" but not in "today" or "daylight".
-private fun isWholeWordAt(text: String, index: Int, length: Int): Boolean {
-    val before = if (index > 0) text[index - 1] else ' '
-    val after = if (index + length < text.length) text[index + length] else ' '
-    return !before.isLetterOrDigit() && !after.isLetterOrDigit()
-}
-
-// First match of [q] in [text] at or after [from], honouring the case
-// and whole-word flags. Returns -1 when none. Whole-word matching walks
-// past substring hits ("day" inside "today") until a real boundary hit
-// or the end of the text.
-internal fun findMatchIn(
-    text: String,
-    q: String,
-    from: Int,
-    matchCase: Boolean,
-    wholeWord: Boolean
-): Int {
-    var index = text.indexOf(q, from, ignoreCase = !matchCase)
-    if (!wholeWord) return index
-    while (index != -1) {
-        if (isWholeWordAt(text, index, q.length)) return index
-        index = text.indexOf(q, index + 1, ignoreCase = !matchCase)
-    }
-    return -1
-}
+// Whole-word matching itself lives in data.findMatchIn (shared with the
+// note search) — see data.TextMatch.
 
 /**
  * Scan of every verse in [books], preserving canonical book / chapter /
@@ -456,6 +433,7 @@ internal fun BibleSearchResults(
     strongsLoaded: Boolean = false,
     activeStudyWord: StudyWordToken? = null,
     onToggleStudyWord: (StudyWordToken) -> Unit = {},
+    onOpenLexicon: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -513,7 +491,7 @@ internal fun BibleSearchResults(
                 // InterlinearToggle visual language (primary container)
                 // without the ΑΩ glyph — the label spells the module out.
                 Surface(
-                    shape = RoundedCornerShape(999.dp),
+                    shape = PillShape,
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
                 ) {
                     Text(
@@ -594,6 +572,7 @@ internal fun BibleSearchResults(
                                     strongsLoaded = strongsLoaded,
                                     activeStudyWord = activeStudyWord,
                                     onToggleStudyWord = onToggleStudyWord,
+                                    onOpenLexicon = onOpenLexicon,
                                     onGloballyPositioned = { y -> rowYs[rowIndex] = y },
                                     onClick = { onOpen(match) }
                                 )
@@ -630,6 +609,7 @@ private fun BibleSearchMatchRow(
     strongsLoaded: Boolean,
     activeStudyWord: StudyWordToken?,
     onToggleStudyWord: (StudyWordToken) -> Unit,
+    onOpenLexicon: (String) -> Unit = {},
     onGloballyPositioned: (Int) -> Unit,
     onClick: () -> Unit
 ) {
@@ -796,7 +776,8 @@ private fun BibleSearchMatchRow(
             WordStudyPanel(
                 token = activeForThisVerse,
                 loaded = strongsLoaded,
-                onClose = { onToggleStudyWord(activeForThisVerse) }
+                onClose = { onToggleStudyWord(activeForThisVerse) },
+                onOpenLexicon = onOpenLexicon
             )
         }
     }
@@ -859,10 +840,11 @@ internal fun RecentQueriesMenu(
         // ToolbarTip (the ribbon's hover-tooltip helper) makes the icon's
         // new menu role discoverable.
         ToolbarTip(label = "Recent queries") {
-            Text(
-                text = "\uD83D\uDD0D",
-                style = MaterialTheme.typography.bodyMedium,
+            Icon(
+                imageVector = RibbonIcons.Find,
+                contentDescription = "Recent queries",
                 modifier = Modifier
+                    .size(20.dp)
                     .hoverable(remember { MutableInteractionSource() })
                     .clickable {
                         SoundManager.play(SoundEvent.Click)
@@ -944,10 +926,11 @@ private fun SearchScopeDropdown(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Text(
-                    text = "\u25BE",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Icon(
+                    imageVector = RibbonIcons.ChevronDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

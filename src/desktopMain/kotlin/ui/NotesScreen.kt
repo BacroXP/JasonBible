@@ -11,7 +11,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
@@ -38,9 +37,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,6 +57,7 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragData
 import androidx.compose.ui.draganddrop.dragData
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -80,11 +83,18 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import data.BibleRepository
+import data.MediaReferenceToken
+import data.MediaSearchKind
+import data.MediaSearchResult
+import data.MediaTitleCache
 import data.NotesRepository
 import data.SettingsManager
 import data.SoundEvent
 import data.SoundManager
+import data.fetchMediaTitle
+import data.findMediaReferenceTokens
 import data.openExternalUrl
+import data.searchYouTube
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -92,6 +102,10 @@ import kotlin.math.roundToInt
 import model.Book
 import model.ParsedNote
 import ui.components.MaxWidthScaffold
+import java.awt.FileDialog
+import java.awt.Frame
+import java.net.URI
+import java.nio.file.Path
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -219,6 +233,11 @@ fun NotesScreen(
     // keeps no in-memory cache, so the fresh list always matches disk).
     var notes by remember { mutableStateOf(NotesRepository.listFiles()) }
 
+    // Folder list for the sidebar sections. Recomputed when the note
+    // list changes — folder create / rename / delete / move all refresh
+    // `notes`, so the sections always mirror disk.
+    val folders = remember(notes) { NotesRepository.folders() }
+
     var selectedFileNameState by remember {
         mutableStateOf(selectedFileName ?: notes.firstOrNull()?.fileName)
     }
@@ -236,6 +255,15 @@ fun NotesScreen(
     // same pattern as the Bible picker, inserts `@service:content ` at the
     // caret (rendered as a clickable chip by the editor).
     var mediaPickerOpen by remember { mutableStateOf(false) }
+    // Custom highlight-color picker (the toolbar's rainbow dot). Non-null
+    // while the dialog is open; seeded with the color of the marker at the
+    // selection / cursor line so re-picking the same text starts from its
+    // current color.
+    var colorPickerHex by remember { mutableStateOf<String?>(null) }
+    var colorPickerOpen by remember { mutableStateOf(false) }
+    // Folder management dialog (create / rename / move-note). Non-null
+    // while the dialog is open.
+    var folderDialog by remember { mutableStateOf<FolderDialogMode?>(null) }
     // In-app media preview popup: non-null while a media chip's preview
     // card is open — the tapped token plus the chip's window anchor.
     var mediaPreview by remember { mutableStateOf<MediaPreviewState?>(null) }
@@ -256,7 +284,42 @@ fun NotesScreen(
     var saveBanner by remember { mutableStateOf<String?>(null) }
 
     val selectedNote = selectedFileNameState?.let { NotesRepository.loadNote(it) }
-    val visualTransformation = rememberNoteVisualTransformation()
+
+    // Media chips render the media's TITLE (oEmbed / profile name / file
+    // name) instead of the raw `@youtube:…` link once fetched. The lookup
+    // reads the session title cache; the version counter is bumped when a
+    // new title lands so the remembered transformation rebuilds and the
+    // editor re-filters with the fresh chip text.
+    var mediaTitleVersion by remember { mutableStateOf(0) }
+    val mediaTitleLookup: (MediaReferenceToken) -> String? = remember {
+        { token -> token.resolveUrl()?.let { MediaTitleCache.get(it) } }
+    }
+    val visualTransformation = rememberNoteVisualTransformation(
+        mediaTitleLookup = mediaTitleLookup,
+        mediaTitleVersion = mediaTitleVersion
+    )
+
+    // Fetch media titles for the media chips in the open note so they
+    // display the media's title instead of the link. Re-runs whenever the
+    // note or its text changes, but MediaTitleCache serves cached URLs
+    // instantly (and failed fetches are cached as null), so typing past an
+    // already-resolved token never re-fetches. The debounce keeps a typing
+    // burst from firing a fetch per keystroke; the version bump rebuilds
+    // the transformation so the editor re-filters with the new titles.
+    LaunchedEffect(selectedNote?.fileName, editorValue.text) {
+        if (editorValue.text.isEmpty()) return@LaunchedEffect
+        delay(200)
+        val tokens = findMediaReferenceTokens(editorValue.text)
+        if (tokens.isEmpty()) return@LaunchedEffect
+        var newTitles = false
+        for (token in tokens) {
+            val url = token.resolveUrl() ?: continue
+            if (MediaTitleCache.isCached(url)) continue
+            val title = fetchMediaTitle(token)
+            if (title != null) newTitles = true
+        }
+        if (newTitles) mediaTitleVersion++
+    }
 
     // Editor scroll state hoisted out of EditorSurface so a parent
     // LaunchedEffect can drive `animateScrollTo` when a NoteChip click
@@ -385,7 +448,16 @@ fun NotesScreen(
     var editorFontScale by remember { mutableStateOf(SettingsManager.editorFontScale) }
 
     LaunchedEffect(selectedFileName, notes) {
-        if (selectedFileName != null && selectedFileNameState != selectedFileName) {
+        // Only adopt the prop when the file it names actually exists on
+        // disk. External opens (openNoteByTitle / global search) always
+        // point at a live file, while a STALE prop — e.g. Navigation
+        // hasn't mirrored a rename back yet — names a deleted file and
+        // must never yank the selection off the freshly-renamed note.
+        // This guards the save path regardless of callback timing.
+        if (selectedFileName != null &&
+            selectedFileNameState != selectedFileName &&
+            NotesRepository.loadNote(selectedFileName) != null
+        ) {
             selectedFileNameState = selectedFileName
         } else if (selectedFileNameState == null) {
             selectedFileNameState = notes.firstOrNull()?.fileName
@@ -505,10 +577,16 @@ fun NotesScreen(
     }
 
     /**
-     * Save the active note in place and reset the UndoManager. Both the
+     * Save the active note and reset the UndoManager. Both the
      * EditorHeader's "Save" button and the Ctrl+S keystroke route here
      * so the two surfaces can never drift in their banner / state
      * semantics.
+     *
+     * The note is RENAMED on disk when its `# ` title changed — the
+     * file name always follows the title — and the editor, sidebar list
+     * and Navigation all switch to the new path so the same note stays
+     * selected (the old file is gone, so pointing anywhere else at it
+     * would drop the user out of the note).
      *
      * The keyboard path can fire while the editor isn't mounted (e.g.
      * right after a screen transition before the new `selectedNote`
@@ -523,14 +601,29 @@ fun NotesScreen(
         if (note == null) return
         saving = true
         val originalName = note.fileName
-        val saved = NotesRepository.saveNoteInPlace(
+        val saved = NotesRepository.saveNote(
             originalFileName = originalName,
             content = editorValue.text
         )
+        val renamed = saved.fileName != originalName
+        // Point the editor, the sidebar list and Navigation at the
+        // (possibly renamed) file. Navigation must learn the new name
+        // SYNCHRONOUSLY — its `selectedNoteFileName` state is re-read by
+        // the prop-sync effect on the next recomposition, and a stale
+        // prop would snap the selection back to the (now deleted) old
+        // file. The synchronous callback keeps the recomposition frame
+        // consistent (prop == state → the sync effect no-ops).
+        selectedFileNameState = saved.fileName
+        notes = NotesRepository.listFiles()
+        onSelectedNoteChange(saved.fileName)
         editorValue = TextFieldValue(saved.content)
         undoManager.reset()
         undoManager.recordChange(editorValue, editorValue)
-        saveBanner = "Saved in place: $originalName"
+        saveBanner = if (renamed) {
+            "Renamed to \"${saved.title.ifBlank { saved.fileName }}\" (was $originalName)"
+        } else {
+            "Saved: ${saved.fileName}"
+        }
         saving = false
     }
 
@@ -612,6 +705,37 @@ fun NotesScreen(
         applyEditorChange(removeColorMarkers(editorValue))
     }
 
+    /**
+     * The `[#hex]` marker color of the current selection / cursor line
+     * (or null when none): seeds the color picker dialog so re-coloring
+     * the same text starts from its existing color.
+     */
+    fun currentMarkerHex(): String? {
+        val text = editorValue.text
+        if (text.isEmpty()) return null
+        val sel = editorValue.selection
+        val start = minOf(sel.start, sel.end).coerceIn(0, text.length)
+        val end = maxOf(sel.start, sel.end).coerceIn(0, text.length)
+        // A selection colors a range of text; a collapsed caret colors the
+        // whole line it sits on — same scope the toolbar's color dots use.
+        val scope = if (sel.collapsed) {
+            val lineStart = text.lastIndexOf('\n', start - 1).let { if (it < 0) 0 else it + 1 }
+            val lineEnd = text.indexOf('\n', start).let { if (it < 0) text.length else it }
+            text.substring(lineStart, lineEnd)
+        } else {
+            text.substring(start, end)
+        }
+        // colorMarkerRegex matches the full `[#hex]` token; the picker
+        // wants the bare color, so strip the brackets.
+        return colorMarkerRegex.find(scope)?.value
+            ?.removeSurrounding("[", "]")
+    }
+
+    fun openColorPicker() {
+        colorPickerHex = currentMarkerHex()
+        colorPickerOpen = true
+    }
+
     fun insertDate() {
         applyEditorChange(insertAtSelection(editorValue, DATE_FORMATTER.format(LocalDate.now())))
     }
@@ -678,6 +802,78 @@ fun NotesScreen(
         }
     }
 
+    // ------------------------------------------------------------------
+    // Quote autocomplete (citations)
+    // ------------------------------------------------------------------
+
+    // Chain suggestion: the caret line already is a colored quote ending
+    // in a reference chip; the verse AFTER the cited range is suggested.
+    // Cheap (a regex + a direct verse lookup), so it recomputes
+    // synchronously on every edit instead of debouncing.
+    val chainSuggestion = remember(editorValue.text, editorValue.selection, suggestBooks) {
+        if (editorValue.selection.collapsed) {
+            computeChainSuggestion(suggestBooks, editorValue.text, editorValue.selection.end)
+        } else {
+            null
+        }
+    }
+    // Fresh prefix: the trailing text at the caret that could be the start
+    // of a verse (or null when the editor isn't in a quote-typing state).
+    val citePrefix = remember(editorValue.text, editorValue.selection) {
+        if (editorValue.selection.collapsed) {
+            quotePrefixAt(editorValue.text, editorValue.selection.end)
+        } else {
+            null
+        }
+    }
+    // The `@Phrase` the caret is completing (e.g. the `@Josia` in
+    // "Watch @Josia"), or null. Recomputed synchronously on every edit —
+    // a cheap string scan. Also gates the FRESH citation suggestion: on
+    // an `@Phrase` line ("@Josia Queen") the user's intent is a media
+    // reference, so the blue verse bar must not light up alongside the
+    // media suggestions.
+    val mediaPrefix = remember(editorValue.text, editorValue.selection) {
+        if (editorValue.selection.collapsed) {
+            mediaSearchPrefixAt(editorValue.text, editorValue.selection.end)
+        } else {
+            null
+        }
+    }
+    // Fresh match, debounced + scanned on a background thread (a full
+    // translation is ~31k verses). The match is stored PAIRED with the
+    // exact prefix it was scanned for, so a suggestion can never be built
+    // with a mismatched range — the effect nulls it at the START of every
+    // run and re-keys on every keystroke, cancelling the pending scan.
+    var citeFresh by remember { mutableStateOf<Pair<CitePrefix, CiteVerse>?>(null) }
+    LaunchedEffect(citePrefix, chainSuggestion, suggestBooks) {
+        citeFresh = null
+        if (chainSuggestion != null || citePrefix == null || suggestBooks.isEmpty()) {
+            return@LaunchedEffect
+        }
+        delay(120)
+        val prefix = citePrefix
+        citeFresh = withContext(Dispatchers.Default) {
+            findFreshCite(suggestBooks, prefix.text)?.let { prefix to it }
+        }
+    }
+    // The active suggestion: a chain (next verse of an existing citation)
+    // wins over a fresh typed-prefix match — but a fresh match only when
+    // the caret isn't completing an `@Phrase` (media wins there).
+    val citeSuggestion: CiteSuggestion? = chainSuggestion ?: if (mediaPrefix == null) {
+        citeFresh?.let { (prefix, fresh) ->
+            FreshCiteSuggestion(
+                book = fresh.book,
+                chapter = fresh.chapter,
+                verse = fresh.verse,
+                text = fresh.text,
+                prefixStart = prefix.start,
+                prefixEnd = prefix.end
+            )
+        }
+    } else {
+        null
+    }
+
     /**
      * Replace the typed `$partial` token with `$FullBookName` (keeping
      * the '$') and park the caret right after the completed name.
@@ -697,6 +893,57 @@ fun NotesScreen(
     }
 
     /**
+     * Insert the currently suggested citation — Tab turns the typed
+     * prefix into a blue colored quote with its reference behind it, or
+     * appends the next verse to an existing citation and corrects the
+     * reference range. Routed through [applyEditorChange] so the insert
+     * stays undoable.
+     */
+    fun acceptCiteSuggestion() {
+        val suggestion = citeSuggestion ?: return
+        applyEditorChange(applyCiteSuggestion(editorValue, suggestion))
+    }
+
+    // ------------------------------------------------------------------
+    // Media reference autofill (`@Phrase` → web search for channels/videos)
+    // ------------------------------------------------------------------
+
+    // Search results, debounced + fetched off the UI thread (a results
+    // page scrape can take a moment). Stored PAIRED with the exact prefix
+    // they were searched for, so a suggestion can never be accepted with
+    // a mismatched range — the effect nulls the pair at the START of
+    // every run and re-keys on every keystroke, cancelling the pending
+    // search. The bar simply isn't composed until results arrive (and
+    // never while offline, when the search degrades to an empty list).
+    var mediaSearchResult by remember {
+        mutableStateOf<Pair<MediaPrefix, List<MediaSearchResult>>?>(null)
+    }
+    LaunchedEffect(mediaPrefix) {
+        mediaSearchResult = null
+        val prefix = mediaPrefix ?: return@LaunchedEffect
+        delay(250)
+        val results = withContext(Dispatchers.IO) {
+            searchYouTube(prefix.query)
+        }
+        mediaSearchResult = prefix to results
+    }
+    // The active suggestions: only the pair matching the CURRENT prefix.
+    val mediaSuggestions = mediaSearchResult
+        ?.takeIf { it.first == mediaPrefix }
+        ?.second
+        .orEmpty()
+
+    /**
+     * Insert the picked media suggestion — replaces the typed `@Phrase`
+     * with the full `@youtube:…` token. Routed through
+     * [applyEditorChange] so the insert stays undoable.
+     */
+    fun acceptMediaSuggestion(result: MediaSearchResult) {
+        val pair = mediaSearchResult ?: return
+        applyEditorChange(applyMediaSuggestion(editorValue, pair.first, result))
+    }
+
+    /**
      * Live update of the editor zoom while the footer slider is being
      * dragged — touches only in-memory state for a smooth preview; the
      * value is persisted to disk on [commitFontScale] (slider release).
@@ -711,6 +958,61 @@ fun NotesScreen(
      */
     fun commitFontScale() {
         SettingsManager.editorFontScale = editorFontScale
+    }
+
+    /**
+     * Import existing notes (.note / .txt / .md) via a native file
+     * dialog as NEW notes — an import never overwrites an existing file
+     * (the repository dedupes names), so it's always undoable by
+     * deleting the created file. The last successfully imported note is
+     * selected so the result is immediately visible; unsupported /
+     * unreadable files are reported on the save banner.
+     */
+    fun doImportNotes() {
+        SoundManager.play(SoundEvent.Click)
+        val dialog = FileDialog(null as Frame?, "Import notes", FileDialog.LOAD)
+        dialog.isMultipleMode = true
+        dialog.file = "*.note"
+        dialog.isVisible = true
+        val files = dialog.files?.toList().orEmpty()
+        if (files.isEmpty()) return
+        val supported = setOf("note", "txt", "md")
+        var imported = 0
+        var lastImported: String? = null
+        val skipped = mutableListOf<String>()
+        files.forEach { file ->
+            val ext = file.extension.lowercase()
+            if (ext !in supported) {
+                skipped.add("${file.name} (unsupported type)")
+                return@forEach
+            }
+            val result = NotesRepository.importNote(Path.of(file.absolutePath))
+            if (result.fileName != null) {
+                imported++
+                lastImported = result.fileName
+            } else {
+                skipped.add("${file.name} (${result.error ?: "failed"})")
+            }
+        }
+        notes = NotesRepository.listFiles()
+        lastImported?.let { selectedFileNameState = it }
+        saveBanner = buildString {
+            append("Imported $imported note${if (imported == 1) "" else "s"}")
+            if (skipped.isNotEmpty()) append(" — ${skipped.size} skipped")
+        }
+    }
+
+    /**
+     * Delete an (empty) folder from the sidebar. Folders that still
+     * contain notes refuse politely — the user must move or delete the
+     * notes first, so a stray click can never destroy notes.
+     */
+    fun deleteFolderAction(name: String) {
+        SoundManager.play(SoundEvent.Click)
+        if (!NotesRepository.deleteFolder(name)) {
+            saveBanner = "Folder \"$name\" is not empty — move or delete its notes first."
+        }
+        notes = NotesRepository.listFiles()
     }
 
     /**
@@ -797,6 +1099,21 @@ fun NotesScreen(
         object : DragAndDropTarget {
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 val data = event.dragData()
+                // Local media files: import each into the notes media
+                // folder and insert its `@file:…` token at the caret.
+                // Unsupported files (documents, archives) are skipped
+                // silently — text drops still work as before.
+                val fileUris = (data as? DragData.FilesList)?.readFiles().orEmpty()
+                if (fileUris.isNotEmpty()) {
+                    val refs = fileUris.mapNotNull { uri ->
+                        runCatching { Path.of(URI.create(uri)) }.getOrNull()
+                            ?.let { NotesRepository.importMediaFile(it) }
+                    }
+                    if (refs.isEmpty()) return false
+                    val tokens = refs.joinToString(" ") { "@file:$it " }
+                    applyEditorChange(insertAtSelection(editorValue, tokens))
+                    return true
+                }
                 val droppedText = (data as? DragData.Text)?.readText()?.trim().orEmpty()
                 if (droppedText.isBlank()) return false
                 applyEditorChange(insertAtSelection(editorValue, droppedText))
@@ -916,34 +1233,136 @@ fun NotesScreen(
                                                 MaterialTheme.typography.titleMedium
                                             }
                                         )
-                                        Text(
-                                            text = "+",
-                                            style = MaterialTheme.typography.titleLarge,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier
-                                                .clickable {
-                                                    SoundManager.play(SoundEvent.Click)
-                                                    doCreateNote()
-                                                }
-                                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            // Import .note / .txt / .md files
+                                            Text(
+                                                text = "⇪",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        SoundManager.play(SoundEvent.Click)
+                                                        doImportNotes()
+                                                    }
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                            // New folder
+                                            Text(
+                                                text = "▤",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        SoundManager.play(SoundEvent.Click)
+                                                        folderDialog = FolderDialogMode.Create
+                                                    }
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                            // New note
+                                            Text(
+                                                text = "+",
+                                                style = MaterialTheme.typography.titleLarge,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        SoundManager.play(SoundEvent.Click)
+                                                        doCreateNote()
+                                                    }
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
 
                                     LazyColumn(
                                         verticalArrangement = Arrangement.spacedBy(6.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        items(notes, key = { it.fileName }) { note ->
-                                            NoteFileCard(
-                                                note = note,
-                                                selected = note.fileName == selectedFileNameState,
-                                                onClick = {
-                                                    if (selectedFileNameState != note.fileName) {
-                                                        selectedFileNameState = note.fileName
+                                        if (folders.isEmpty()) {
+                                            items(notes, key = { it.fileName }) { note ->
+                                                NoteFileCard(
+                                                    note = note,
+                                                    selected = note.fileName == selectedFileNameState,
+                                                    onClick = {
+                                                        if (selectedFileNameState != note.fileName) {
+                                                            selectedFileNameState = note.fileName
+                                                        }
+                                                    },
+                                                    onDelete = { deleteCandidate = note },
+                                                    onMove = {
+                                                        folderDialog = FolderDialogMode.Move(
+                                                            note.fileName,
+                                                            note.folder
+                                                        )
                                                     }
-                                                },
-                                                onDelete = { deleteCandidate = note }
-                                            )
+                                                )
+                                            }
+                                        } else {
+                                            // Notes are organised in
+                                            // folders: render each folder
+                                            // as a section (header + its
+                                            // notes), then the root notes
+                                            // in their own section.
+                                            folders.forEach { folder ->
+                                                val folderNotes = notes.filter { it.folder == folder }
+                                                item(key = "folder:$folder") {
+                                                    FolderHeaderRow(
+                                                        name = folder,
+                                                        count = folderNotes.size,
+                                                        onRename = {
+                                                            folderDialog = FolderDialogMode.Rename(folder)
+                                                        },
+                                                        onDelete = { deleteFolderAction(folder) }
+                                                    )
+                                                }
+                                                items(folderNotes, key = { it.fileName }) { note ->
+                                                    NoteFileCard(
+                                                        note = note,
+                                                        selected = note.fileName == selectedFileNameState,
+                                                        onClick = {
+                                                            if (selectedFileNameState != note.fileName) {
+                                                                selectedFileNameState = note.fileName
+                                                            }
+                                                        },
+                                                        onDelete = { deleteCandidate = note },
+                                                        onMove = {
+                                                            folderDialog = FolderDialogMode.Move(
+                                                                note.fileName,
+                                                                note.folder
+                                                            )
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                            val rootNotes = notes.filter { it.folder.isEmpty() }
+                                            if (rootNotes.isNotEmpty()) {
+                                                item(key = "folder:__root__") {
+                                                    FolderHeaderRow(
+                                                        name = "Root",
+                                                        count = rootNotes.size,
+                                                        canManage = false,
+                                                        onRename = {},
+                                                        onDelete = {}
+                                                    )
+                                                }
+                                                items(rootNotes, key = { it.fileName }) { note ->
+                                                    NoteFileCard(
+                                                        note = note,
+                                                        selected = note.fileName == selectedFileNameState,
+                                                        onClick = {
+                                                            if (selectedFileNameState != note.fileName) {
+                                                                selectedFileNameState = note.fileName
+                                                            }
+                                                        },
+                                                        onDelete = { deleteCandidate = note },
+                                                        onMove = {
+                                                            folderDialog = FolderDialogMode.Move(
+                                                                note.fileName,
+                                                                note.folder
+                                                            )
+                                                        }
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -969,10 +1388,35 @@ fun NotesScreen(
                             onClick = { doCreateNote() },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("New note")
+                            Icon(
+                                imageVector = RibbonIcons.New,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text("New note", modifier = Modifier.padding(start = 8.dp))
+                        }
+                        Button(
+                            onClick = { doImportNotes() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                // Same download-into-tray glyph as the PDF
+                                // export action — the direction fits both.
+                                imageVector = RibbonIcons.Export,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text("Import notes…", modifier = Modifier.padding(start = 8.dp))
                         }
                         if (showBackButton) {
-                            Button(onClick = back, modifier = Modifier.fillMaxWidth()) { Text("Back") }
+                            Button(onClick = back, modifier = Modifier.fillMaxWidth()) {
+                                Icon(
+                                    imageVector = RibbonIcons.Back,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text("Back", modifier = Modifier.padding(start = 8.dp))
+                            }
                         }
                     } else {
                         saveBanner?.let { msg ->
@@ -1012,6 +1456,15 @@ fun NotesScreen(
                             onToggleOrientation = {
                                 applyEditorChange(toggleLineOrientation(editorValue))
                             },
+                            onAlignLeft = {
+                                applyEditorChange(toggleLineAlignment(editorValue, LineAlignment.LEFT))
+                            },
+                            onAlignCenter = {
+                                applyEditorChange(toggleLineAlignment(editorValue, LineAlignment.CENTER))
+                            },
+                            onAlignRight = {
+                                applyEditorChange(toggleLineAlignment(editorValue, LineAlignment.RIGHT))
+                            },
                             onToggleAutoContinue = { autoContinueLists = !autoContinueLists },
                             onCopy = { copySelection() },
                             onCut = { cutSelection() },
@@ -1019,6 +1472,7 @@ fun NotesScreen(
                             onToggleFind = { toggleFind() },
                             onSelectAll = { selectAllText() },
                             onRemoveColor = { removeColor() },
+                            onOpenColorPicker = { openColorPicker() },
                             onClearFormatting = { clearFormatting() },
                             onOpenReferencePicker = { kind ->
                                 referencePickerKind = kind
@@ -1138,6 +1592,20 @@ fun NotesScreen(
                                     }
                                     is ReferenceHit.Media -> mediaPreview =
                                         MediaPreviewState(hit.token, anchor)
+                                    is ReferenceHit.Note -> {
+                                        // `[[Title]]` note link: switch the
+                                        // editor to the linked note. The
+                                        // title resolves via
+                                        // NotesRepository.findByTitle; a
+                                        // missing target shows a banner
+                                        // instead of silently doing nothing.
+                                        val target = NotesRepository.findByTitle(hit.title)
+                                        if (target != null) {
+                                            selectedFileNameState = target.fileName
+                                        } else {
+                                            saveBanner = "Note \"${hit.title}\" not found."
+                                        }
+                                    }
                                     null -> Unit
                                 }
                             },
@@ -1164,6 +1632,25 @@ fun NotesScreen(
                                     refSuggestions.isNotEmpty()
                                 ) {
                                     acceptReferenceSuggestion()
+                                    true
+                                } else if (event.type == KeyEventType.KeyDown &&
+                                    event.key == Key.Tab &&
+                                    !event.isCtrlPressed && !event.isAltPressed &&
+                                    mediaSuggestions.isNotEmpty()
+                                ) {
+                                    // Tab inserts the first matching media
+                                    // (channel/video) for the typed @Phrase.
+                                    acceptMediaSuggestion(mediaSuggestions.first())
+                                    true
+                                } else if (event.type == KeyEventType.KeyDown &&
+                                    event.key == Key.Tab &&
+                                    !event.isCtrlPressed && !event.isAltPressed &&
+                                    citeSuggestion != null
+                                ) {
+                                    // Tab completes the suggested citation
+                                    // (insert or append a verse). Only a
+                                    // bare Tab — Enter stays a newline here.
+                                    acceptCiteSuggestion()
                                     true
                                 } else {
                                     handleEditorShortcut(
@@ -1238,20 +1725,17 @@ fun NotesScreen(
                                     onInlineWrap = { marker ->
                                         applyEditorChange(toggleWrap(editorValue, marker))
                                     },
-                                    // Direction toggles for the user's
-                                    // left/center/right mention (Ctrl+L /
-                                    // E / R). See handleEditorShortcut
-                                    // doc for the "we map to RLM
-                                    // markers, not real alignment"
-                                    // caveat.
-                                    onCycleOrientation = {
-                                        applyEditorChange(toggleLineOrientation(editorValue))
+                                    // Real paragraph alignment (Ctrl+L /
+                                    // E / R) — left / center / right,
+                                    // stored as invisible leading markers.
+                                    onAlignLeft = {
+                                        applyEditorChange(toggleLineAlignment(editorValue, LineAlignment.LEFT))
                                     },
-                                    onForceLtr = {
-                                        applyEditorChange(forceLineOrientation(editorValue, false))
+                                    onAlignCenter = {
+                                        applyEditorChange(toggleLineAlignment(editorValue, LineAlignment.CENTER))
                                     },
-                                    onForceRtl = {
-                                        applyEditorChange(forceLineOrientation(editorValue, true))
+                                    onAlignRight = {
+                                        applyEditorChange(toggleLineAlignment(editorValue, LineAlignment.RIGHT))
                                     },
                                     // Insert pickers (Ctrl+K opens the
                                     // verse picker, Ctrl+Shift+K the book
@@ -1291,7 +1775,7 @@ fun NotesScreen(
                                 )
                                 refSuggestions.forEach { book ->
                                     Surface(
-                                        shape = RoundedCornerShape(999.dp),
+                                        shape = PillShape,
                                         color = MaterialTheme.colorScheme.primaryContainer,
                                         modifier = Modifier.clickable {
                                             SoundManager.play(SoundEvent.Click)
@@ -1310,6 +1794,52 @@ fun NotesScreen(
                                 }
                             }
                         }
+
+                        // Media autofill: while the caret completes an
+                        // `@Phrase` (e.g. "@Josia"), matching YouTube
+                        // channels / videos from a debounced web search
+                        // appear here; Tab (or a click) inserts the
+                        // correct @youtube:… token in place of the phrase.
+                        if (mediaSuggestions.isNotEmpty()) {
+                            MediaSuggestionBar(
+                                suggestions = mediaSuggestions,
+                                onClick = { result ->
+                                    SoundManager.play(SoundEvent.Click)
+                                    acceptMediaSuggestion(result)
+                                }
+                            )
+                        }
+
+                        // Quote/citation suggestion: while the caret types
+                        // the start of a Bible verse, the full matched
+                        // verse appears here as a blue bar; Tab (or a
+                        // click) inserts it as a colored quote with its
+                        // reference — and, once inserted, suggests the
+                        // NEXT verse so Tab chains them into a range.
+                        citeSuggestion?.let { suggestion ->
+                            CitationSuggestionBar(
+                                suggestion = suggestion,
+                                chain = suggestion is ChainCiteSuggestion,
+                                onClick = {
+                                    SoundManager.play(SoundEvent.Click)
+                                    acceptCiteSuggestion()
+                                }
+                            )
+                        }
+
+                        // Rich media cards: every `@youtube:…` / `@spotify:…` /
+                        // `@url:…` link in the note renders below the editor
+                        // (and below the transient $Book autocomplete row)
+                        // with its thumbnail (or a "title - channel" fallback)
+                        // and title + channel beneath. Clicking a card opens
+                        // the link in the default browser.
+                        MediaReferencesPanel(
+                            text = editorValue.text,
+                            onOpenUrl = { url ->
+                                SoundManager.play(SoundEvent.Click)
+                                openExternalUrl(url)
+                            }
+                        )
 
                         EditorFooter(
                             value = editorValue,
@@ -1394,6 +1924,75 @@ fun NotesScreen(
                         applyEditorChange(insertAtSelection(editorValue, text))
                     },
                     onOpenGlobalSearch = onOpenGlobalSearch
+                )
+            }
+
+            // Custom highlight-color picker (toolbar rainbow dot).
+            // Applies the chosen color to the selection / cursor line via
+            // the same toggleColoredQuote the preset dots use.
+            if (colorPickerOpen) {
+                ColorPickerDialog(
+                    initialHex = colorPickerHex,
+                    onDismiss = { colorPickerOpen = false },
+                    onPick = { hex ->
+                        colorPickerOpen = false
+                        applyEditorChange(toggleColoredQuote(editorValue, hex))
+                    }
+                )
+            }
+
+            // Folder management dialog (create / rename / move-note).
+            folderDialog?.let { mode ->
+                FolderDialog(
+                    mode = mode,
+                    onDismiss = { folderDialog = null },
+                    onConfirm = { value ->
+                        when (mode) {
+                            is FolderDialogMode.Create -> {
+                                if (NotesRepository.createFolder(value)) {
+                                    saveBanner = "Folder \"$value\" created."
+                                } else {
+                                    saveBanner = "Could not create folder \"$value\"."
+                                }
+                            }
+                            is FolderDialogMode.Rename -> {
+                                // The open note may live inside the renamed
+                                // folder — its on-disk path changes with the
+                                // folder, so re-point the editor at the new
+                                // path or the sidebar selection dangles.
+                                val editedInFolder = selectedFileNameState
+                                    ?.takeIf { it.startsWith("${mode.oldName}/") }
+                                when {
+                                    mode.oldName == value -> Unit // no-op rename
+
+                                    NotesRepository.renameFolder(mode.oldName, value) -> {
+                                        saveBanner = "Folder renamed to \"$value\"."
+                                        if (editedInFolder != null) {
+                                            // renameFolder moves the whole
+                                            // directory, so the note keeps
+                                            // its name relative to the folder.
+                                            selectedFileNameState =
+                                                "$value/${editedInFolder.substringAfter('/')}"
+                                        }
+                                    }
+
+                                    else -> saveBanner = "Could not rename folder."
+                                }
+                            }
+                            is FolderDialogMode.Move -> {
+                                val moved = NotesRepository.moveNote(mode.fileName, value)
+                                if (moved == null) {
+                                    saveBanner = "Could not move note."
+                                } else if (selectedFileNameState == mode.fileName) {
+                                    // The note being edited moved — keep
+                                    // the editor on it under its new path.
+                                    selectedFileNameState = moved
+                                }
+                            }
+                        }
+                        notes = NotesRepository.listFiles()
+                        folderDialog = null
+                    }
                 )
             }
 
@@ -1542,9 +2141,10 @@ private fun NotesSearchBar(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
-            Text(
-                text = "\uD83D\uDD0D",
-                style = MaterialTheme.typography.bodyMedium
+            Icon(
+                imageVector = RibbonIcons.Find,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
             )
             BasicTextField(
                 value = query,
@@ -1775,4 +2375,369 @@ private val REFERENCE_PREFIX_TERMINATORS = setOf(
     '(', ')', '[', ']', '{', '}',
     '\u00BB', '\u00AB', '\u201E', '\u201C', '\u201D', '/'
 )
+
+
+/**
+ * The media suggestion bar shown below the editor while the caret
+ * completes an `@Phrase`: up to [MAX_MEDIA_SUGGESTIONS] matching
+ * channels / videos from the debounced web search, each with a muted
+ * kind icon, its title and a secondary line (channel name / subscriber
+ * count) plus the `@service` tag it will insert. Tab (or a click)
+ * inserts the token; the bar simply isn't composed until results arrive.
+ */
+@Composable
+private fun MediaSuggestionBar(
+    suggestions: List<MediaSearchResult>,
+    onClick: (MediaSearchResult) -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .padding(8.dp)
+    ) {
+        Text(
+            text = "Media:",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        suggestions.forEach { result ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable {
+                        onClick(result)
+                    }
+                    .padding(horizontal = 8.dp, vertical = 5.dp)
+            ) {
+                Icon(
+                    imageVector = if (result.kind == MediaSearchKind.CHANNEL) {
+                        RibbonIcons.MediaChannel
+                    } else {
+                        RibbonIcons.MediaPlay
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = result.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (result.subtitle.isNotBlank()) {
+                        Text(
+                            text = result.subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Text(
+                    text = "@" + result.service.key,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+        Text(
+            text = "[Tab] insert",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+
+/**
+ * The blue suggestion bar shown below the editor while a citation is being
+ * typed: the full matched verse (rendered as a blue colored quote) plus
+ * its reference, with a Tab hint ("insert" for a fresh match, "append"
+ * when chaining the next verse onto an existing citation). Clicking the
+ * bar accepts the suggestion too.
+ */
+@Composable
+private fun CitationSuggestionBar(
+    suggestion: CiteSuggestion,
+    chain: Boolean,
+    onClick: () -> Unit
+) {
+    val blue = colorFromHexInternal(CITE_BLUE_HEX)
+    val hoverSource = remember { MutableInteractionSource() }
+    val isHovered by hoverSource.collectIsHoveredAsState()
+    LaunchedEffect(isHovered) {
+        if (isHovered) {
+            delay(60)
+            SoundManager.play(SoundEvent.Hover)
+        }
+    }
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (isHovered) {
+            MaterialTheme.colorScheme.surfaceVariant
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .hoverable(hoverSource)
+            .clickable {
+                SoundManager.play(SoundEvent.Click)
+                onClick()
+            }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            // Blue accent bar — the "colored quote" cue.
+            Box(
+                modifier = Modifier
+                    .size(width = 4.dp, height = 36.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(blue)
+            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "${suggestion.book.name} ${suggestion.chapter}:${suggestion.verse}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "\u201E${suggestion.text}\u201C",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = blue,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                text = if (chain) "[Tab] append" else "[Tab] insert",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Folder management (sidebar sections + dialogs)
+// ---------------------------------------------------------------------------
+
+/** What the folder dialog is doing right now. */
+private sealed interface FolderDialogMode {
+    data object Create : FolderDialogMode
+    data class Rename(val oldName: String) : FolderDialogMode
+    data class Move(val fileName: String, val currentFolder: String) : FolderDialogMode
+}
+
+
+/**
+ * One sidebar section header: the folder name with its note count and
+ * (when [canManage]) a "…" menu offering Rename / Delete. Folders that
+ * still contain notes refuse deletion at the action level, so the menu
+ * never destroys notes.
+ */
+@Composable
+private fun FolderHeaderRow(
+    name: String,
+    count: Int,
+    canManage: Boolean = true,
+    onRename: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, end = 2.dp, top = 6.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                imageVector = RibbonIcons.Folder,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "$name  ($count)",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        }
+        if (canManage) {
+            Box {
+                Icon(
+                    imageVector = RibbonIcons.More,
+                    contentDescription = "Folder actions",
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable {
+                            SoundManager.play(SoundEvent.Click)
+                            menuOpen = true
+                        }
+                        .padding(horizontal = 2.dp, vertical = 2.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        onClick = {
+                            SoundManager.play(SoundEvent.Click)
+                            menuOpen = false
+                            onRename()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete folder") },
+                        onClick = {
+                            SoundManager.play(SoundEvent.Click)
+                            menuOpen = false
+                            onDelete()
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+
+/** One selectable folder row inside the move dialog. */
+@Composable
+private fun FolderChoiceRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable {
+                SoundManager.play(SoundEvent.Click)
+                onClick()
+            }
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        if (selected) {
+            Text("\u2713", color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+
+/**
+ * The folder dialog: a name field for Create / Rename, or a folder
+ * picker (Root + every folder except the note's current one) for Move.
+ */
+@Composable
+private fun FolderDialog(
+    mode: FolderDialogMode,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var name by remember(mode) {
+        mutableStateOf(if (mode is FolderDialogMode.Rename) mode.oldName else "")
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                when (mode) {
+                    is FolderDialogMode.Create -> "New folder"
+                    is FolderDialogMode.Rename -> "Rename folder"
+                    is FolderDialogMode.Move -> "Move note to folder"
+                }
+            )
+        },
+        text = {
+            when (mode) {
+                is FolderDialogMode.Create, is FolderDialogMode.Rename -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("Folder name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        // Nested folders ("Unterordner") are simply paths:
+                        // a hint makes the capability discoverable.
+                        if (mode is FolderDialogMode.Create) {
+                            Text(
+                                text = "Use / for subfolders (e.g. Study/Deep).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                is FolderDialogMode.Move -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FolderChoiceRow(
+                            label = "Root (no folder)",
+                            selected = mode.currentFolder.isEmpty()
+                        ) { onConfirm("") }
+                        NotesRepository.folders()
+                            .filter { it != mode.currentFolder }
+                            .forEach { folder ->
+                                FolderChoiceRow(
+                                    label = folder,
+                                    selected = mode.currentFolder == folder
+                                ) { onConfirm(folder) }
+                            }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (mode is FolderDialogMode.Create || mode is FolderDialogMode.Rename) {
+                TextButton(
+                    enabled = name.isNotBlank(),
+                    onClick = { onConfirm(name.trim()) }
+                ) {
+                    Text("OK")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
 

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,6 +21,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -705,10 +707,18 @@ internal fun GlobalSearchOverlay(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(16.dp)
                 ) {
-                    Text(
-                        text = "\uD83D\uDD0D Search",
-                        style = MaterialTheme.typography.headlineSmall
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = RibbonIcons.Find,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = "Search",
+                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
 
                     // ---- query bar (same visual language as the Bible /
                     // notes search bars) ----
@@ -1163,13 +1173,20 @@ private fun BookResultRow(
                 }
                 .padding(horizontal = 4.dp, vertical = 6.dp)
         ) {
-            Text(
-                text = if (expanded) "\u25BE" else "\u25B8",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            Icon(
+                imageVector = if (expanded) RibbonIcons.ChevronDown else RibbonIcons.ChevronRight,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                imageVector = RibbonIcons.Bible,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "\uD83D\uDCD6 " + group.book.name,
+                text = group.book.name,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f)
@@ -1256,8 +1273,14 @@ private fun LoneChapterRow(
             }
             .padding(horizontal = 4.dp, vertical = 5.dp)
     ) {
+        Icon(
+            imageVector = RibbonIcons.Bible,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
         Text(
-            text = "\uD83D\uDCD6 ${lone.book.name} ${lone.chapter}",
+            text = "${lone.book.name} ${lone.chapter}",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.weight(1f)
@@ -1353,13 +1376,22 @@ private fun NoteHitRow(
             }
             .padding(horizontal = 4.dp, vertical = 5.dp)
     ) {
-        Text(
-            text = "\uD83D\uDCC4 " + hit.note.title.ifBlank { hit.note.fileName },
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = RibbonIcons.Document,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = hit.note.title.ifBlank { hit.note.fileName },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 6.dp)
+            )
+        }
         Text(
             text = highlightQuery(hit.lineText, query, matchCase, wholeWord),
             style = MaterialTheme.typography.bodySmall,

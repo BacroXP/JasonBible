@@ -181,7 +181,10 @@ object NotePdfExporter {
      * with spaces (the line-by-line loop above handles line breaks).
      */
     private fun sanitizePdfText(text: String): String {
+        // Also drop the editor-only alignment markers (\u200B / \u2060)
+        // so a centered or right-aligned line exports clean.
         val stripped = text.replace(RLM, "").replace(LRM, "")
+            .replace(ALIGN_CENTER, "").replace(ALIGN_RIGHT, "")
         val sb = StringBuilder(stripped.length)
         for (c in stripped) {
             val cp = c.code

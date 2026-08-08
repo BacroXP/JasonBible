@@ -2,7 +2,7 @@
 
 <img src="src/desktopMain/resources/icons/Icon-512.png" width="110" alt="BibleApp icon"/>
 
-# 📖 BibleApp
+# 📖 JasonBible
 
 **A fast, fully offline Bible reader & note-taking app for Linux, Windows & macOS.**
 
@@ -100,10 +100,8 @@ attaches all three installers to a new release automatically.
 *On the way 🚧* — drop real screenshots into `docs/screenshots/` and reference
 them here, e.g.:
 
-```html
 <img src="docs/screenshots/home.png" alt="Home" width="70%">
-<img src="docs/screenshots/word-study.png" alt="Word study" width="70%">
-```
+<img src="docs/screenshots/split-screen.png" alt="Word study" width="70%">
 
 ## 🗂 Where things live
 
@@ -119,7 +117,3 @@ them here, e.g.:
 - **🛠 CI pipeline** — https://github.com/BacroXP/JasonBible/actions
 - **📦 Release guide** — [RELEASING.md](RELEASING.md)
 - **🧱 Tech stack** — [Kotlin](https://kotlinlang.org) 2.2 · [Compose Multiplatform](https://www.jetbrains.com/lp/compose-multiplatform/) 1.9 (Material 3) · kotlinx-serialization · Apache PDFBox
-
-## 📄 License
-
-MIT

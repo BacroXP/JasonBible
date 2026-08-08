@@ -4,7 +4,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.withContext
 import model.Book
 import model.Chapter
 
@@ -109,6 +108,24 @@ object BibleRepository {
         val parsed = JsonLoader.loadBible(entry.resourcePath)
         moduleCache[id] = parsed
         return parsed
+    }
+
+    /**
+     * Text of ONE verse inside an already-parsed module, or null when the
+     * book / chapter / verse doesn't exist there (e.g. a New-Testament
+     * verse in an Old-Testament-only module, or a verse beyond the last
+     * one). Pure lookup — no parsing, no I/O — so the verse-comparison
+     * screen and its tests share exactly one extraction implementation.
+     */
+    fun verseTextFor(
+        books: List<Book>?,
+        bookNumber: Int,
+        chapterNumber: Int,
+        verseNumber: Int
+    ): String? {
+        val book = books?.find { it.book == bookNumber } ?: return null
+        val chapter = book.chapters.find { it.chapter == chapterNumber } ?: return null
+        return chapter.verses.find { it.verse == verseNumber }?.text
     }
 
     /**

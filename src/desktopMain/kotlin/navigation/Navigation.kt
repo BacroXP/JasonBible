@@ -12,22 +12,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import data.NotesRepository
@@ -42,7 +36,11 @@ enum class Screen {
     BIBLE,
     NOTES,
     SPLIT,
-    SETTINGS
+    SETTINGS,
+    STATISTICS,
+    LEXICON,
+    COLLECTIONS,
+    COMPARE
 }
 
 
@@ -98,6 +96,17 @@ fun Navigation(
     // every leave/re-enter of Settings so a later visit is unfiltered.
     var settingsSearchPrefill by remember {
         mutableStateOf<String?>(null)
+    }
+    // Strong's number the Word Study screen should open on (set by the
+    // "Open in Word Study" links in the Bible pane's word-study panels;
+    // consumed and cleared by LexiconScreen on first composition).
+    var lexiconInitialNumber by remember {
+        mutableStateOf<String?>(null)
+    }
+    // Verse the compare screen should open on (set by the Bible pane's
+    // "⇄ Compare" action; read once by VerseCompareScreen).
+    var compareReference by remember {
+        mutableStateOf<BibleReferenceSelection?>(null)
     }
 
     // The global Ctrl+F search: one overlay on top of every screen (except
@@ -210,6 +219,16 @@ fun Navigation(
                     openNotes = {
                         screen = Screen.NOTES
                     },
+                    openStatistics = {
+                        screen = Screen.STATISTICS
+                    },
+                    openLexicon = {
+                        lexiconInitialNumber = null
+                        screen = Screen.LEXICON
+                    },
+                    openCollections = {
+                        screen = Screen.COLLECTIONS
+                    },
                     openSettings = {
                         settingsSearchPrefill = null
                         screen = Screen.SETTINGS
@@ -238,7 +257,15 @@ fun Navigation(
                     },
                     // Dialogs (separate windows) forward Ctrl+F here: dismiss
                     // themselves and open the global search overlay.
-                    onOpenGlobalSearch = { appSearch.openSearch() }
+                    onOpenGlobalSearch = { appSearch.openSearch() },
+                    onOpenLexicon = { number ->
+                        lexiconInitialNumber = number
+                        screen = Screen.LEXICON
+                    },
+                    onOpenCompare = { bookName, cn, vn ->
+                        compareReference = BibleReferenceSelection(bookName, cn, vn)
+                        screen = Screen.COMPARE
+                    }
                 )
     
     
@@ -397,7 +424,16 @@ fun Navigation(
                                         openNoteByTitle(title, reference)
                                     },
                                     // Dialogs (separate windows) forward Ctrl+F here.
-                                    onOpenGlobalSearch = { appSearch.openSearch() }
+                                    onOpenGlobalSearch = { appSearch.openSearch() },
+                                    onOpenLexicon = { number ->
+                                        lexiconInitialNumber = number
+                                        screen = Screen.LEXICON
+                                    },
+                                    onOpenCompare = { bookName, cn, vn ->
+                                        compareReference =
+                                            BibleReferenceSelection(bookName, cn, vn)
+                                        screen = Screen.COMPARE
+                                    }
                                 )
                             }
                             // Draggable divider. The previous version had a
@@ -473,6 +509,49 @@ fun Navigation(
                             screen = Screen.HOME
                         }
                     )
+
+
+            Screen.STATISTICS ->
+                StatisticsScreen(
+                    back = {
+                        screen = Screen.HOME
+                    }
+                )
+
+
+            Screen.LEXICON ->
+                LexiconScreen(
+                    initialQuery = lexiconInitialNumber,
+                    onInitialQueryConsumed = { lexiconInitialNumber = null },
+                    onOpenVerse = { book, chapter, verse ->
+                        openBible(BibleReferenceSelection(book, chapter, verse))
+                    },
+                    onBack = {
+                        screen = Screen.HOME
+                    }
+                )
+
+
+            Screen.COLLECTIONS ->
+                CollectionsScreen(
+                    back = {
+                        screen = Screen.HOME
+                    },
+                    onOpenVerse = { bookName, chapter, verse ->
+                        openBible(
+                            BibleReferenceSelection(bookName, chapter, verse)
+                        )
+                    }
+                )
+
+
+            Screen.COMPARE ->
+                VerseCompareScreen(
+                    initialReference = compareReference,
+                    back = {
+                        screen = Screen.HOME
+                    }
+                )
             }
     
             // Global Ctrl+F search overlay — floats above every screen. Both
@@ -499,6 +578,18 @@ fun Navigation(
                     }
                 )
             }
+
+            // Mini player: pinned bottom-right, appears whenever the in-app
+            // media player has something loaded and SURVIVES screen changes
+            // (going back / opening another note keeps the clip playing —
+            // the always-on-top player window keeps running and this card
+            // provides pause / resume / close from any screen). Clicking
+            // the card re-opens the player window.
+            MiniPlayer(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            )
         }
     }
     

@@ -1,6 +1,9 @@
 package ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
@@ -27,6 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -41,9 +45,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -203,7 +210,17 @@ fun SettingsScreen(
         "Starts the app maximized to the whole screen",
         "Starts the app in a window"
     )
-    val showAppearance = appearanceAll || darkModeRow || fullscreenRow
+    val colorStyleRow = settingsMatch(
+        searchQuery,
+        "Color style",
+        "Normal",
+        "Saturated",
+        "Gray",
+        "Custom",
+        "accent",
+        "accent color"
+    )
+    val showAppearance = appearanceAll || darkModeRow || fullscreenRow || colorStyleRow
 
     val layoutAll = settingsMatch(searchQuery, "Layout")
     val bibleWidthRow = settingsMatch(searchQuery, "Bible max width")
@@ -379,6 +396,10 @@ fun SettingsScreen(
                                 )
                             }
                         }
+
+                        if (appearanceAll || colorStyleRow) {
+                            ColorStyleSetting()
+                        }
                     }
 
                     if (showLayout) {
@@ -499,7 +520,15 @@ fun SettingsScreen(
                                 onClick = { SoundManager.play(SoundEvent.Click) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Test click sound")
+                                Icon(
+                                    imageVector = RibbonIcons.Sound,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Test click sound",
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
                             }
                         }
                     }
@@ -663,7 +692,15 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Back")
+                        Icon(
+                            imageVector = RibbonIcons.Back,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Back",
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
                     }
                 }
 
@@ -676,6 +713,140 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+
+/**
+ * Color style picker: four selectable chips (Normal / Saturated / Gray /
+ * Custom), each showing its palette's primary hue, plus — when Custom is
+ * selected — a row of accent seed swatches. Selecting a style re-themes
+ * the whole window instantly (the scheme is derived in ui.AppTheme from
+ * the persisted key / seed).
+ */
+@Composable
+private fun ColorStyleSetting() {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Color style")
+        Text(
+            "Changes the app's accent colors. Normal is the default scheme; " +
+                "Saturated is more vivid; Gray is monochrome; Custom uses the " +
+                "accent color you pick below.",
+            style = MaterialTheme.typography.bodySmall
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            AppColorStyle.entries.forEach { style ->
+                val selected = AppColorStyle.fromKey(SettingsManager.colorStyle) == style
+                val preview = stylePrimaryColor(
+                    style = style,
+                    dark = SettingsManager.darkMode,
+                    customAccent = SettingsManager.customAccentColor
+                )
+                ColorStyleChip(
+                    label = style.label,
+                    color = preview,
+                    selected = selected,
+                    onClick = {
+                        SoundManager.play(SoundEvent.Click)
+                        SettingsManager.colorStyle = style.key
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        if (AppColorStyle.fromKey(SettingsManager.colorStyle) == AppColorStyle.CUSTOM) {
+            Text(
+                "Accent color",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                ACCENT_SEEDS.forEach { seedArgb ->
+                    val selected = SettingsManager.customAccentColor == seedArgb
+                    val accentColor = Color(seedArgb)
+                    val borderColor = if (selected) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    }
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(PillShape)
+                            .border(
+                                width = if (selected) 3.dp else 1.dp,
+                                color = borderColor,
+                                shape = PillShape
+                            )
+                            .clickable {
+                                SoundManager.play(SoundEvent.Click)
+                                SettingsManager.customAccentColor = seedArgb
+                            }
+                            .padding(3.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(PillShape)
+                                .background(accentColor)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+/** One selectable color-style chip: a primary-hue dot + label. */
+@Composable
+private fun ColorStyleChip(
+    label: String,
+    color: Color,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(8.dp)
+    Surface(
+        shape = shape,
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        },
+        border = if (selected) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        },
+        modifier = modifier.clickable(onClick = onClick)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(vertical = 8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(18.dp)
+                    .clip(PillShape)
+                    .background(color)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium
+            )
         }
     }
 }
@@ -701,7 +872,20 @@ private fun DropdownSettingRow(
                 onClick = { onExpandedChange(true) },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(value)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = value,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = RibbonIcons.ChevronDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
             DropdownMenu(
@@ -757,9 +941,10 @@ private fun SettingsSearchBar(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
-            Text(
-                text = "\uD83D\uDD0D",
-                style = MaterialTheme.typography.bodyMedium
+            Icon(
+                imageVector = RibbonIcons.Find,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
             )
             BasicTextField(
                 value = query,
@@ -821,7 +1006,7 @@ private fun IntStepperSlider(
         modifier = Modifier.fillMaxWidth()
     ) {
         StepperButton(
-            label = "\u2212",
+            icon = RibbonIcons.Minus,
             enabled = value > min,
             onClick = { onValueChange(value - 1) }
         )
@@ -833,7 +1018,7 @@ private fun IntStepperSlider(
             modifier = Modifier.weight(1f)
         )
         StepperButton(
-            label = "+",
+            icon = RibbonIcons.Plus,
             enabled = value < max,
             onClick = { onValueChange(value + 1) }
         )
@@ -858,7 +1043,7 @@ private const val STEPPER_ACCEL = 0.75
  */
 @Composable
 private fun StepperButton(
-    label: String,
+    icon: ImageVector,
     enabled: Boolean,
     onClick: () -> Unit
 ) {
@@ -925,10 +1110,11 @@ private fun StepperButton(
             }
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleMedium,
-                color = if (enabled) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = if (enabled) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)

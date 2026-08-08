@@ -30,9 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
@@ -275,7 +273,9 @@ internal fun NoteFileCard(
     note: ParsedNote,
     selected: Boolean,
     onClick: () -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    /** Move the note to another folder (revealed on hover). */
+    onMove: (() -> Unit)? = null
 ) {
     val hoverSource = remember { MutableInteractionSource() }
     val isHovered by hoverSource.collectIsHoveredAsState()
@@ -308,6 +308,20 @@ internal fun NoteFileCard(
                     maxLines = 1,
                     modifier = Modifier.weight(1f)
                 )
+                // Quick move-to-folder affordance, revealed on hover.
+                if (isHovered && onMove != null) {
+                    Text(
+                        text = "\u21F1",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .clickable {
+                                data.SoundManager.play(data.SoundEvent.Click)
+                                onMove()
+                            }
+                    )
+                }
                 // Quick delete affordance, revealed on hover. Routes into
                 // the same confirmation dialog as the EditorHeader button.
                 if (isHovered && onDelete != null) {

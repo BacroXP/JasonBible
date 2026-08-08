@@ -173,6 +173,113 @@ class NotesRepositoryTest {
     }
 
     @Test
+    fun saveNoteWithBlankTitleFallsBackToDefaultName() {
+        // A note whose `# ` heading was deleted entirely has no title to
+        // derive a name from — it moves to the sanitized `note` fallback
+        // (with a -N suffix if another test's note already owns it).
+        val created = NotesRepository.createNote("Some Title")
+        val original = created.fileName
+
+        val saved = NotesRepository.saveNote(original, "no heading here")
+
+        assertTrue(saved.fileName.startsWith("note"), "expected note*.note but was ${saved.fileName}")
+        assertTrue(saved.fileName.endsWith(".note"))
+        assertEquals(null, NotesRepository.loadNote(original))
+        val reloaded = NotesRepository.loadNote(saved.fileName)
+        assertNotNull(reloaded)
+        assertTrue(reloaded.content.contains("no heading here"))
+    }
+
+    @Test
+    fun saveNoteRenamesFileWhenTitleChanges() {
+        // Editing the `# ` heading and saving moves the file on disk so
+        // the sidebar / file explorer always show the title's name.
+        val created = NotesRepository.createNote("Old Title")
+        val originalName = created.fileName
+
+        val saved = NotesRepository.saveNote(
+            originalFileName = originalName,
+            content = "# New Title\nbody line"
+        )
+
+        assertEquals("new-title.note", saved.fileName)
+        assertEquals("New Title", saved.title)
+        // The old file is gone, the new one holds the saved content.
+        assertEquals(null, NotesRepository.loadNote(originalName))
+        val reloaded = NotesRepository.loadNote("new-title.note")
+        assertNotNull(reloaded)
+        assertTrue(reloaded.content.contains("body line"))
+    }
+
+    @Test
+    fun saveNoteNeverOverwritesSiblingNoteOnNameCollision() {
+        // Renaming a note onto a name another note already owns must not
+        // clobber the sibling — the newcomer gets a `-1` suffix instead,
+        // mirroring createNote's uniqueness scheme.
+        val sibling = NotesRepository.createNote("Shared")
+        val mine = NotesRepository.createNote("Mine")
+        val siblingContent = sibling.content
+
+        val saved = NotesRepository.saveNote(
+            originalFileName = mine.fileName,
+            content = "# Shared\ncontent-of-mine"
+        )
+
+        // Newcomer moved aside; the sibling's file is byte-for-byte intact.
+        assertEquals("shared-1.note", saved.fileName)
+        assertEquals(siblingContent, NotesRepository.loadNote(sibling.fileName)?.content)
+        assertEquals(null, NotesRepository.loadNote(mine.fileName))
+        val moved = NotesRepository.loadNote("shared-1.note")
+        assertNotNull(moved)
+        assertTrue(moved.content.contains("content-of-mine"))
+    }
+
+    @Test
+    fun alignmentMarkerOnHeadingStillParses() {
+        // A centered / right-aligned heading carries an invisible leading
+        // marker (`\u200B` / `\u2060`); it must be stripped before
+        // classification so the note still parses as a heading.
+        val fileName = "align-heading.note"
+        NotesRepository.saveNoteInPlace(fileName, "\u200B# Centered Title\nbody text")
+        val note = NotesRepository.loadNote(fileName)
+        assertNotNull(note)
+        assertEquals("Centered Title", note.title)
+        // The marker must never leak into the block text.
+        assertEquals(HeadingBlock(1, "Centered Title"), note.blocks.first())
+    }
+
+    @Test
+    fun saveNoteNamesFileFromMarkerPrefixedHeading() {
+        // Title extraction (which drives file naming) also strips the
+        // alignment markers, so a right-aligned heading still names the
+        // note file.
+        val created = NotesRepository.createNote("Old Title")
+        val saved = NotesRepository.saveNote(
+            originalFileName = created.fileName,
+            content = "\u2060# Right Aligned Title\nbody"
+        )
+        assertEquals("right-aligned-title.note", saved.fileName)
+        assertEquals("Right Aligned Title", saved.title)
+    }
+
+    @Test
+    fun saveNoteKeepsPathWhenTitleSanitizesToSameName() {
+        // A title that already matches the file name (e.g. only case or
+        // spacing changed) is a no-op rename: same path, old file kept.
+        val created = NotesRepository.createNote("My Note")
+        val originalName = created.fileName
+
+        val saved = NotesRepository.saveNote(
+            originalFileName = originalName,
+            content = "# My  Note\nbody"
+        )
+
+        assertEquals(originalName, saved.fileName)
+        assertEquals("My  Note", saved.title)
+        assertNotNull(NotesRepository.loadNote(originalName))
+    }
+
+    @Test
     fun dollarMoneyIsNotARefLineAndParsesAsParagraph() {
         // `$5.99` doesn't match the reference regex (needs a book name),
         // and — unlike a `$Book` line — isn't a reference line at all.

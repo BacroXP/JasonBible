@@ -317,7 +317,8 @@ internal fun BibleSearchResultsFor(
     wordStudyEnabled: Boolean = false,
     strongsLoaded: Boolean = false,
     activeStudyWord: StudyWordToken? = null,
-    onToggleStudyWord: (StudyWordToken) -> Unit = {}
+    onToggleStudyWord: (StudyWordToken) -> Unit = {},
+    onOpenLexicon: (String) -> Unit = {}
 ) {
     BibleSearchResults(
         query = state.query,
@@ -335,6 +336,7 @@ internal fun BibleSearchResultsFor(
         strongsLoaded = strongsLoaded,
         activeStudyWord = activeStudyWord,
         onToggleStudyWord = onToggleStudyWord,
+        onOpenLexicon = onOpenLexicon,
         modifier = modifier
     )
 }

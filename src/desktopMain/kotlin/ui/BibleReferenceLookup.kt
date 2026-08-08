@@ -6,8 +6,10 @@
 package ui
 
 import data.MediaReferenceToken
+import data.NoteLinkToken
 import data.ReferenceToken
 import data.findMediaReferenceTokens
+import data.findNoteLinkTokens
 import data.findReferenceTokens
 import data.parseRange
 
@@ -36,7 +38,7 @@ internal fun findFirstReferenceOffset(
         val nl = source.indexOf('\n', pos)
         val lineEnd = if (nl == -1) source.length else nl
         if (lineEnd > pos) {
-            val line = source.substring(pos, lineEnd)
+            val line = stripLeadingMarkers(source.substring(pos, lineEnd))
             val match = referenceLineRegex.matchEntire(line)
             if (match != null) {
                 val lineBook = match.groupValues[1].trim()
@@ -207,7 +209,13 @@ internal data class ReferenceLookup(
      * Inline `@service:content` media tokens (YouTube, Spotify, …) with
      * source-absolute offsets, scanned once via [findMediaReferenceTokens].
      */
-    val mediaTokens: List<MediaReferenceToken> = emptyList()
+    val mediaTokens: List<MediaReferenceToken> = emptyList(),
+    /**
+     * Inline `[[Title]]` note-to-note links with source-absolute offsets,
+     * scanned once via [findNoteLinkTokens]. Clicking one opens the
+     * linked note in the editor.
+     */
+    val noteLinks: List<NoteLinkToken> = emptyList()
 )
 
 internal fun buildReferenceLookup(text: String): ReferenceLookup {
@@ -216,17 +224,17 @@ internal fun buildReferenceLookup(text: String): ReferenceLookup {
     val byLine = mutableMapOf<Int, ReferenceMatch>()
     val tokens = mutableListOf<ReferenceToken>()
     val mediaTokens = mutableListOf<MediaReferenceToken>()
+    val noteLinks = mutableListOf<NoteLinkToken>()
     var idx = 0
     var scan = 0
     while (scan <= text.length) {
         val nl = text.indexOf('\n', scan)
         val lineEnd = if (nl == -1) text.length else nl
         val raw = text.substring(scan, lineEnd)
-        val stripped = when {
-            raw.startsWith(RLM) -> raw.removePrefix(RLM)
-            raw.startsWith(LRM) -> raw.removePrefix(LRM)
-            else -> raw
-        }
+        // Hidden alignment + direction markers are editor-only: strip
+        // them so a centered / right-aligned reference line still
+        // matches (`\u200B$Lukas$3$16` → `$Lukas$3$16`).
+        val stripped = stripLeadingMarkers(raw)
         val wholeLineMatch = referenceLineRegex.matchEntire(stripped)
         if (wholeLineMatch != null) {
             val lineChapter = wholeLineMatch.groupValues[2].toIntOrNull()
@@ -240,37 +248,53 @@ internal fun buildReferenceLookup(text: String): ReferenceLookup {
                 endVerse = lineRange?.endVerse,
                 label = wholeLineMatch.groupValues[5].trim().ifBlank { null }
             )
-        } else if (coloredQuoteRegex.matchEntire(stripped) == null) {
-            // Inline `$Book$C$V` tokens in ordinary lines. Colored-quote
-            // lines render their text verbatim (the transformation never
-            // chips tokens there), so excluding them keeps click-through
-            // consistent with what is actually drawn; whole-line refs are
-            // covered by byLine above.
-            findReferenceTokens(raw).forEach { token ->
-                tokens.add(
+        } else {
+            // `[[Title]]` note-to-note links are scanned on EVERY line
+            // (whole-line refs are handled by byLine above; note links
+            // are a different token kind that can also sit in
+            // colored-quote trailing text — where the transformation
+            // renders them as chips — so they must stay hit-testable
+            // there too).
+            findNoteLinkTokens(raw).forEach { token ->
+                noteLinks.add(
                     token.copy(
                         sourceStart = token.sourceStart + scan,
                         sourceEnd = token.sourceEnd + scan
                     )
                 )
             }
-            // Same for `@service:content` media tokens — including
-            // whole-line media refs, which never match the Bible
-            // referenceLineRegex and so land in this branch.
-            findMediaReferenceTokens(raw).forEach { token ->
-                mediaTokens.add(
-                    token.copy(
-                        sourceStart = token.sourceStart + scan,
-                        sourceEnd = token.sourceEnd + scan
+            if (coloredQuoteRegex.matchEntire(stripped) == null) {
+                // Inline `$Book$C$V` tokens in ordinary lines. Colored-quote
+                // lines render their text verbatim (the transformation never
+                // chips tokens there), so excluding them keeps click-through
+                // consistent with what is actually drawn; whole-line refs are
+                // covered by byLine above.
+                findReferenceTokens(raw).forEach { token ->
+                    tokens.add(
+                        token.copy(
+                            sourceStart = token.sourceStart + scan,
+                            sourceEnd = token.sourceEnd + scan
+                        )
                     )
-                )
+                }
+                // Same for `@service:content` media tokens — including
+                // whole-line media refs, which never match the Bible
+                // referenceLineRegex and so land in this branch.
+                findMediaReferenceTokens(raw).forEach { token ->
+                    mediaTokens.add(
+                        token.copy(
+                            sourceStart = token.sourceStart + scan,
+                            sourceEnd = token.sourceEnd + scan
+                        )
+                    )
+                }
             }
         }
         starts[idx++] = scan
         if (nl == -1) break
         scan = lineEnd + 1
     }
-    return ReferenceLookup(starts.copyOf(idx), byLine, tokens, mediaTokens)
+    return ReferenceLookup(starts.copyOf(idx), byLine, tokens, mediaTokens, noteLinks)
 }
 
 
@@ -283,6 +307,8 @@ internal fun buildReferenceLookup(text: String): ReferenceLookup {
 internal sealed interface ReferenceHit {
     data class Bible(val match: ReferenceMatch) : ReferenceHit
     data class Media(val token: MediaReferenceToken) : ReferenceHit
+    /** A `[[Title]]` note-to-note link — opens the linked note. */
+    data class Note(val title: String) : ReferenceHit
 }
 
 internal fun findReferenceInLookup(lookup: ReferenceLookup, sourcePos: Int): ReferenceHit? {
@@ -337,6 +363,20 @@ internal fun findReferenceInLookup(lookup: ReferenceLookup, sourcePos: Int): Ref
         )
         if (token != null) {
             return ReferenceHit.Media(token)
+        }
+    }
+    // Note-to-note links (`[[Title]]`) — same containment rule. Checked
+    // last so a `$Book` reference or media token wins over a link that
+    // happens to wrap around it.
+    if (lookup.noteLinks.isNotEmpty()) {
+        val token = findTokenContaining(
+            lookup.noteLinks,
+            clamped,
+            { it.sourceStart },
+            { it.sourceEnd }
+        )
+        if (token != null) {
+            return ReferenceHit.Note(token.title)
         }
     }
     return null

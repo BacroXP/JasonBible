@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -59,7 +60,6 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -117,7 +117,13 @@ fun BibleScreen(
      * forwards the global-search shortcut here — dismissing itself and
      * opening the overlay in the main window.
      */
-    onOpenGlobalSearch: () -> Unit = {}
+    onOpenGlobalSearch: () -> Unit = {},
+    /** Opens the central word-study / lexicon at a Strong's number.
+     *  Wired by Navigation; defaults to a no-op. */
+    onOpenLexicon: (String) -> Unit = {},
+    /** Opens the verse-comparison screen at a verse (book name, chapter,
+     *  verse). Wired by Navigation; defaults to a no-op. */
+    onOpenCompare: (String, Int, Int) -> Unit = { _, _, _ -> }
 ) {
     val bookGridState = rememberLazyGridState()
     val chapterGridState = rememberLazyGridState()
@@ -133,11 +139,18 @@ fun BibleScreen(
     var selectedBookNumber by remember { mutableStateOf<Int?>(null) }
     var selectedChapterNumber by remember { mutableStateOf<Int?>(null) }
     var selectedVerseNumber by remember { mutableStateOf<Int?>(null) }
+    // "＋ Collection" dialog for the selected verse (opened via the header
+    // pill; only reachable while a verse is selected).
+    var addToCollectionOpen by remember { mutableStateOf(false) }
     // Copy-range dialog for the chapter view's "More ▾" menu; non-null
     // while the dialog is open.
     var copyRangeOpen by remember { mutableStateOf(false) }
     // Ctrl+G jump-to-verse dialog.
     var jumpDialogOpen by remember { mutableStateOf(false) }
+    // Cross-reference panel toggle: when on, the selected verse's derived
+    // cross references (parallels / OT quotations / thematic links) render
+    // below the chapter jump strip.
+    var crossRefsOpen by remember { mutableStateOf(false) }
     // Whole-book continuous reading: renders every chapter of the open
     // book as one scrolling passage (chapter boundaries become headings).
     // Exited whenever the pane navigates to a specific chapter / verse.
@@ -525,8 +538,11 @@ fun BibleScreen(
 
         val chapter = selectedChapter
         val book = selectedBook
+        // `book` is non-null whenever `chapter` is: the chapter is derived
+        // from `book?.chapters?.find { … }`, so the compiler can prove the
+        // `book != null` part of these guards is always true and drops it.
         when {
-            chapter != null && book != null &&
+            chapter != null &&
                 ((event.isCtrlPressed && event.key == Key.DirectionLeft) ||
                     event.key == Key.PageUp) -> {
                 if (chapter.chapter > 1) {
@@ -536,7 +552,7 @@ fun BibleScreen(
                 true
             }
 
-            chapter != null && book != null &&
+            chapter != null &&
                 ((event.isCtrlPressed && event.key == Key.DirectionRight) ||
                     event.key == Key.PageDown) -> {
                 if (chapter.chapter < book.chapters.size) {
@@ -779,6 +795,7 @@ fun BibleScreen(
                             greekBooks = greekBooks,
                             strongsLoaded = strongsLoaded,
                             activeStudyWord = activeStudyWord,
+                            onOpenLexicon = onOpenLexicon,
                             onToggleStudyWord = { token ->
                                 SoundManager.play(SoundEvent.Click)
                                 activeStudyWord = if (activeStudyWord == token) {
@@ -981,7 +998,7 @@ fun BibleScreen(
                                             // transient "✓ Copied" feedback).
                                             CopyPill(
                                                 copyText = chapterCopy,
-                                                label = "📋 Copy chapter"
+                                                label = "Copy chapter"
                                             )
                                             // Interlinear view toggle: cycles
                                             // OFF → Greek line → word-aligned.
@@ -1018,6 +1035,42 @@ fun BibleScreen(
                                                                 InterlinearMode.ALIGNED ->
                                                                     InterlinearMode.OFF
                                                             }
+                                                    }
+                                                )
+                                            }
+                                            // Cross-reference panel toggle: shows the
+                                            // selected verse's derived cross references
+                                            // (parallels / OT quotations / thematic).
+                                            CrossRefsToggle(
+                                                active = crossRefsOpen,
+                                                onClick = {
+                                                    SoundManager.play(SoundEvent.Click)
+                                                    crossRefsOpen = !crossRefsOpen
+                                                }
+                                            )
+                                            // Verse actions: compare across
+                                            // translations / save to a
+                                            // collection. Shown once a verse is
+                                            // selected — like the cross-reference
+                                            // toggle, both key off the selection.
+                                            val selectedForActions = selectedVerseNumber
+                                            if (selectedForActions != null) {
+                                                VerseActionPill(
+                                                    label = "⇄ Compare",
+                                                    tooltip = "Compare this verse across translations",
+                                                    onClick = {
+                                                        onOpenCompare(
+                                                            selectedBook.name,
+                                                            chapter.chapter,
+                                                            selectedForActions
+                                                        )
+                                                    }
+                                                )
+                                                VerseActionPill(
+                                                    label = "＋ Collection",
+                                                    tooltip = "Add this verse to a personal collection",
+                                                    onClick = {
+                                                        addToCollectionOpen = true
                                                     }
                                                 )
                                             }
@@ -1065,6 +1118,49 @@ fun BibleScreen(
                                             }
                                         }
                                     )
+
+                                    // Cross-reference panel for the selected verse,
+                                    // derived from shared Strong's lemmas (no curated
+                                    // dataset is bundled, so nothing is invented).
+                                    if (crossRefsOpen) {
+                                        val selectedVerse = selectedVerseNumber
+                                        if (selectedVerse != null) {
+                                            CrossReferencesPanel(
+                                                bookNumber = selectedBook.book,
+                                                chapterNumber = chapter.chapter,
+                                                verseNumber = selectedVerse,
+                                                books = books,
+                                                onOpenReference = { bookName, cn, vn ->
+                                                    val targetBook = books.find {
+                                                        it.name.equals(bookName, ignoreCase = true)
+                                                    }
+                                                    if (targetBook != null) {
+                                                        jumpToVerse(targetBook.book, cn, vn)
+                                                    }
+                                                }
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Select a verse to see its cross references.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    // "Add to collection" dialog for the
+                                    // selected verse (opened via the header
+                                    // pill). The verse is non-null whenever
+                                    // the pill is visible.
+                                    if (addToCollectionOpen && selectedVerseNumber != null) {
+                                        AddToCollectionDialog(
+                                            bookNumber = selectedBook.book,
+                                            bookName = selectedBook.name,
+                                            chapter = chapter.chapter,
+                                            verse = selectedVerseNumber ?: 1,
+                                            onDismiss = { addToCollectionOpen = false }
+                                        )
+                                    }
 
                                     Row(
                                         modifier = Modifier
@@ -1153,6 +1249,7 @@ fun BibleScreen(
                                                     text = verse.text,
                                                     selected = selectedVerseNumber == verse.verse,
                                                     interlinearGreek = greekVerseByNumber[verse.verse],
+                                                    onOpenLexicon = onOpenLexicon,
                                                     interlinearAligned =
                                                         interlinearMode == InterlinearMode.ALIGNED,
                                                     hoverHighlighted = hoverHighlighted,
@@ -1262,6 +1359,70 @@ fun BibleScreen(
                 onOpenGlobalSearch = onOpenGlobalSearch
             )
         }
+}
+
+
+/**
+ * Compact "⛓ References" pill in the chapter header, mirroring the
+ * InterlinearToggle's visual language: a primary-container pill while the
+ * cross-reference panel is open, a dimmed surface pill otherwise. A hover
+ * tooltip explains what it shows.
+ */
+@Composable
+private fun CrossRefsToggle(
+    active: Boolean,
+    onClick: () -> Unit
+) {
+    ToolbarTip(label = "Cross references: parallels, Old-Testament quotations and thematically related passages for the selected verse") {
+        Surface(
+            shape = PillShape,
+            color = if (active) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
+            },
+            modifier = Modifier.clickable(onClick = onClick)
+        ) {
+            Text(
+                text = if (active) "⛓·on" else "⛓",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+    }
+}
+
+
+/**
+ * One-shot action pill for the chapter header's verse actions (compare /
+ * collection), mirroring the CrossRefsToggle visual language but firing
+ * once instead of toggling.
+ */
+@Composable
+private fun VerseActionPill(
+    label: String,
+    tooltip: String,
+    onClick: () -> Unit
+) {
+    ToolbarTip(label = tooltip) {
+        Surface(
+            shape = PillShape,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+            modifier = Modifier.clickable(onClick = onClick)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+    }
 }
 
 
@@ -1411,19 +1572,30 @@ private fun ChapterMoreMenu(
     var expanded by remember { mutableStateOf(false) }
     Box {
         Surface(
-            shape = RoundedCornerShape(999.dp),
+            shape = PillShape,
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
             modifier = Modifier.clickable {
                 SoundManager.play(SoundEvent.Click)
                 expanded = true
             }
         ) {
-            Text(
-                text = "More \u25BE",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-            )
+            ) {
+                Text(
+                    text = "More",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Icon(
+                    imageVector = RibbonIcons.ChevronDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
         DropdownMenu(
             expanded = expanded,
@@ -1507,6 +1679,9 @@ private fun ContinuousReadingView(
     strongsLoaded: Boolean,
     activeStudyWord: StudyWordToken?,
     onToggleStudyWord: (StudyWordToken) -> Unit,
+    /** Opens the central lexicon at a Strong's number (wired by the host
+     *  screen; defaults to no-op). */
+    onOpenLexicon: (String) -> Unit = {},
     onOpenVerse: (chapterNumber: Int, verseNumber: Int) -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier
@@ -1674,7 +1849,8 @@ private fun ContinuousReadingView(
                             WordStudyMiniPanel(
                                 token = activeForVerse,
                                 loaded = strongsLoaded,
-                                onClose = { onToggleStudyWord(activeForVerse) }
+                                onClose = { onToggleStudyWord(activeForVerse) },
+                                onOpenLexicon = { onOpenLexicon(it) }
                             )
                         }
                     }
@@ -2047,7 +2223,7 @@ private fun InterlinearToggle(
         }
     ) {
         Surface(
-            shape = RoundedCornerShape(999.dp),
+            shape = PillShape,
             color = if (active) {
                 MaterialTheme.colorScheme.primaryContainer
             } else {

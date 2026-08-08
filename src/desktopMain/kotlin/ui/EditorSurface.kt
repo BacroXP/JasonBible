@@ -5,7 +5,6 @@
 
 package ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -38,6 +37,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -53,7 +53,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
@@ -302,7 +301,13 @@ internal fun EditorSurface(
                 }
                 .onPreviewKeyEvent { event -> onShortcut(event) }
                 .dragAndDropTarget(
-                    shouldStartDragAndDrop = { event -> event.dragData() is DragData.Text },
+                    // Accept both plain text drops AND local media files
+                    // (images / videos / audio, which NotesScreen imports
+                    // and embeds as `@file:` tokens).
+                    shouldStartDragAndDrop = { event ->
+                        val data = event.dragData()
+                        data is DragData.Text || data is DragData.FilesList
+                    },
                     target = dropTarget
                 )
         ) {
@@ -321,56 +326,63 @@ internal fun EditorSurface(
                     .fillMaxSize()
                     .verticalScroll(scrollState)
                     .drawWithContent {
-                        // Rounded chip pill behind each reference's
-                        // "Book C:V" text. `SpanStyle.background` can only
-                        // paint a flat rectangle (no corner radius), so
-                        // the chip is drawn here: the transformation
-                        // records the displayed ranges of every chip, and
-                        // we map them to pixel rects via the current
-                        // TextLayoutResult. This modifier sits INSIDE
-                        // verticalScroll, so the pills share the text's
-                        // coordinate space and scroll along with it.
+                        // Rounded chip pills behind reference ("Book C:V")
+                        // and note-link ("[[Title]]") chips.
+                        // `SpanStyle.background` can only paint a flat
+                        // rectangle (no corner radius), so the chips are
+                        // drawn here: the transformation records the
+                        // displayed ranges of every chip, and we map them
+                        // to pixel rects via the current TextLayoutResult.
+                        // This modifier sits INSIDE verticalScroll, so the
+                        // pills share the text's coordinate space and
+                        // scroll along with it.
                         val vt = visualTransformation as? NoteVisualTransformation
                         val layout = layoutResult
-                        if (vt != null && layout != null && vt.referenceChipRanges.isNotEmpty()) {
+                        if (vt != null && layout != null) {
                             val textLen = layout.layoutInput.text.length
                             val corner = CornerRadius(5.dp.toPx())
                             val padX = 2.dp.toPx()
-                            for (range in vt.referenceChipRanges) {
-                                if (range.first >= textLen) continue
-                                val start = range.first.coerceAtMost(textLen - 1)
-                                val end = (range.last + 1).coerceAtMost(textLen)
-                                if (end <= start) continue
-                                // A chip may wrap across lines (long book
-                                // names in a narrow pane). Split it into
-                                // per-line segments so each gets its own
-                                // pill instead of one giant rect spanning
-                                // the inter-line gap.
-                                var segStart = start
-                                while (segStart < end) {
-                                    val line = layout.getLineForOffset(segStart)
-                                    val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = false))
-                                    // Vertical bounds from line metrics so
-                                    // a taller middle glyph (ascender /
-                                    // descender) can't poke out of the
-                                    // pill's top or bottom edge.
-                                    val top = layout.getLineTop(line)
-                                    val bottom = layout.getLineBottom(line)
-                                    val firstBox = layout.getBoundingBox(segStart)
-                                    val lastBox = layout.getBoundingBox(lineEnd - 1)
-                                    val left = minOf(firstBox.left, lastBox.left) - padX
-                                    val right = maxOf(firstBox.right, lastBox.right) + padX
-                                    if (right > left && bottom > top) {
-                                        drawRoundRect(
-                                            color = vt.referenceChipColor,
-                                            topLeft = Offset(left, top),
-                                            size = Size(right - left, bottom - top),
-                                            cornerRadius = corner
-                                        )
+                            fun drawPills(ranges: List<IntRange>, color: Color) {
+                                for (range in ranges) {
+                                    if (range.first >= textLen) continue
+                                    val start = range.first.coerceAtMost(textLen - 1)
+                                    val end = (range.last + 1).coerceAtMost(textLen)
+                                    if (end <= start) continue
+                                    // A chip may wrap across lines (long
+                                    // book names in a narrow pane). Split
+                                    // it into per-line segments so each
+                                    // gets its own pill instead of one
+                                    // giant rect spanning the inter-line
+                                    // gap.
+                                    var segStart = start
+                                    while (segStart < end) {
+                                        val line = layout.getLineForOffset(segStart)
+                                        val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = false))
+                                        // Vertical bounds from line metrics
+                                        // so a taller middle glyph
+                                        // (ascender / descender) can't poke
+                                        // out of the pill's top or bottom
+                                        // edge.
+                                        val top = layout.getLineTop(line)
+                                        val bottom = layout.getLineBottom(line)
+                                        val firstBox = layout.getBoundingBox(segStart)
+                                        val lastBox = layout.getBoundingBox(lineEnd - 1)
+                                        val left = minOf(firstBox.left, lastBox.left) - padX
+                                        val right = maxOf(firstBox.right, lastBox.right) + padX
+                                        if (right > left && bottom > top) {
+                                            drawRoundRect(
+                                                color = color,
+                                                topLeft = Offset(left, top),
+                                                size = Size(right - left, bottom - top),
+                                                cornerRadius = corner
+                                            )
+                                        }
+                                        segStart = lineEnd
                                     }
-                                    segStart = lineEnd
                                 }
                             }
+                            drawPills(vt.referenceChipRanges, vt.referenceChipColor)
+                            drawPills(vt.noteLinkChipRanges, vt.noteLinkChipColor)
                         }
                         drawContent()
                     },
@@ -460,6 +472,24 @@ internal fun EditorSurface(
                                     clipboard.setText(
                                         AnnotatedString(hit.token.resolveUrl().orEmpty())
                                     )
+                                    referenceMenu = null
+                                }
+                            )
+                        }
+                        is ReferenceHit.Note -> {
+                            DropdownMenuItem(
+                                text = { Text("Open note") },
+                                onClick = {
+                                    SoundManager.play(SoundEvent.Click)
+                                    referenceMenu = null
+                                    onTapReference(hit, Offset.Zero, false)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Copy title") },
+                                onClick = {
+                                    SoundManager.play(SoundEvent.Click)
+                                    clipboard.setText(AnnotatedString(hit.title))
                                     referenceMenu = null
                                 }
                             )

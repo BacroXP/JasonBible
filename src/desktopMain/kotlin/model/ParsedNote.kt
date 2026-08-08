@@ -5,7 +5,11 @@ data class ParsedNote(
     val fileName: String,
     val content: String,
     val blocks: List<NoteBlock>,
-    val references: List<NoteReference>
+    val references: List<NoteReference>,
+    /** Titles of other notes this note links to via `[[Title]]`. */
+    val links: List<String> = emptyList(),
+    /** The note's folder relative to the notes root ("" = root). */
+    val folder: String = ""
 )
 
 
