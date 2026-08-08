@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -54,6 +55,7 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragData
 import androidx.compose.ui.draganddrop.dragData
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -113,6 +115,54 @@ private const val NOTES_POLL_INTERVAL_MS = 1000L
 // setFontScale and the persisted clamp all share one definition.
 internal val ZOOM_MIN = SettingsManager.MIN_FONT_SCALE
 internal val ZOOM_MAX = SettingsManager.MAX_FONT_SCALE
+
+
+// ---------------------------------------------------------------------------
+// Verse-range picker (Shift+click on an extended reference chip)
+// ---------------------------------------------------------------------------
+
+/**
+ * State for the Shift+click verse picker: the extended reference chip
+ * that was tapped plus every (chapter, verse) pair of its range
+ * (clamped to each chapter's actual verse count when known), anchored
+ * at the tap point.
+ */
+private data class VersePickerState(
+    val match: ReferenceMatch,
+    val entries: List<Pair<Int, Int>>,
+    val anchor: Offset
+)
+
+/**
+ * Builds the verse list for an extended reference (`$Book&C&V+`,
+ * `-V2`, `-&C2&V2`, …): every (chapter, verse) from the start through
+ * the resolved range end, clamped to each chapter's real verse count
+ * when the active module knows it (a range that runs past a chapter's
+ * end is cut off at its last existing verse). Cross-chapter ranges walk
+ * the intervening chapters. Returns null when there is nothing to pick
+ * from.
+ */
+private fun buildVersePicker(match: ReferenceMatch, anchor: Offset): VersePickerState? {
+    val chapter = match.chapter ?: return null
+    val verse = match.verse ?: return null
+    val endChapter = match.endChapter ?: chapter
+    val endVerse = match.endVerse ?: return null
+    if (endChapter < chapter || (endChapter == chapter && endVerse < verse)) return null
+    val book = runCatching { BibleRepository.getBook(match.book) }.getOrNull()
+    val entries = mutableListOf<Pair<Int, Int>>()
+    for (c in chapter..endChapter) {
+        val chapterData = book?.chapters?.firstOrNull { it.chapter == c }
+        val lastVerse = chapterData?.verses?.lastOrNull()?.verse
+        val first = if (c == chapter) verse else 1
+        val rawLast = if (c == endChapter) endVerse else (lastVerse ?: endVerse)
+        val last = if (lastVerse != null) minOf(rawLast, lastVerse) else rawLast
+        if (last >= first) {
+            for (v in first..last) entries.add(c to v)
+        }
+    }
+    if (entries.isEmpty()) return null
+    return VersePickerState(match, entries, anchor)
+}
 @Composable
 fun NotesScreen(
     back: () -> Unit,
@@ -189,6 +239,10 @@ fun NotesScreen(
     // In-app media preview popup: non-null while a media chip's preview
     // card is open — the tapped token plus the chip's window anchor.
     var mediaPreview by remember { mutableStateOf<MediaPreviewState?>(null) }
+    // Verse-range picker: non-null while the Shift+click popup over an
+    // extended reference chip (`$Book$C$V-7`) is open. Holds the
+    // reference, the resolved verse list and the chip's window anchor.
+    var versePicker by remember { mutableStateOf<VersePickerState?>(null) }
     var editorValue by remember { mutableStateOf(TextFieldValue("")) }
     var saving by remember { mutableStateOf(false) }
 
@@ -1061,13 +1115,27 @@ fun NotesScreen(
                             scrollState = editorScrollState,
                             onLayoutResult = { editorLayoutResult = it },
                             dropTarget = dropTarget,
-                            onTapReference = { hit, anchor ->
+                            onTapReference = { hit, anchor, shiftPressed ->
                                 when (hit) {
-                                    is ReferenceHit.Bible -> onOpenBibleReference(
-                                        hit.match.book,
-                                        hit.match.chapter,
-                                        hit.match.verse
-                                    )
+                                    is ReferenceHit.Bible -> {
+                                        val match = hit.match
+                                        // Shift+click on an extended range
+                                        // chip opens a picker over all of its
+                                        // verses; a plain click (or a
+                                        // single-verse chip) jumps straight
+                                        // to the start verse.
+                                        if (shiftPressed && match.endVerse != null &&
+                                            match.verse != null
+                                        ) {
+                                            versePicker = buildVersePicker(match, anchor)
+                                        } else {
+                                            onOpenBibleReference(
+                                                match.book,
+                                                match.chapter,
+                                                match.verse
+                                            )
+                                        }
+                                    }
                                     is ReferenceHit.Media -> mediaPreview =
                                         MediaPreviewState(hit.token, anchor)
                                     null -> Unit
@@ -1364,6 +1432,82 @@ fun NotesScreen(
                         // window), so Ctrl+F forwards here.
                         onOpenGlobalSearch = onOpenGlobalSearch
                     )
+                }
+            }
+
+            // Verse-range picker (Shift+click on an extended reference
+            // chip like `$John$3$16-7`): lists every verse of the range
+            // so the user can pick which one to jump to. Anchored at the
+            // tapped chip; focusable so Esc / outside click dismisses it.
+            versePicker?.let { picker ->
+                Popup(
+                    popupPositionProvider = remember(picker.anchor) {
+                        MediaPreviewPositionProvider(
+                            IntOffset(
+                                picker.anchor.x.roundToInt(),
+                                picker.anchor.y.roundToInt()
+                            )
+                        )
+                    },
+                    onDismissRequest = { versePicker = null },
+                    properties = PopupProperties(focusable = true)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        tonalElevation = 4.dp,
+                        modifier = Modifier.widthIn(min = 180.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .padding(vertical = 6.dp)
+                                .heightIn(max = 300.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                text = picker.match.displayText(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                            )
+                            picker.entries.forEach { (entryChapter, entryVerse) ->
+                                val rowHover = remember { MutableInteractionSource() }
+                                val rowHovered by rowHover.collectIsHoveredAsState()
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (rowHovered) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                            .copy(alpha = 0.5f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surface
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 6.dp, vertical = 1.dp)
+                                        .hoverable(rowHover)
+                                        .clickable {
+                                            SoundManager.play(SoundEvent.Click)
+                                            versePicker = null
+                                            onOpenBibleReference(
+                                                picker.match.book,
+                                                entryChapter,
+                                                entryVerse
+                                            )
+                                        }
+                                ) {
+                                    Text(
+                                        text = "${picker.match.book} " +
+                                            "$entryChapter:$entryVerse",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(
+                                            horizontal = 10.dp,
+                                            vertical = 6.dp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

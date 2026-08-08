@@ -9,6 +9,7 @@ import data.MediaReferenceToken
 import data.ReferenceToken
 import data.findMediaReferenceTokens
 import data.findReferenceTokens
+import data.parseRange
 
 
 
@@ -41,11 +42,32 @@ internal fun findFirstReferenceOffset(
                 val lineBook = match.groupValues[1].trim()
                 val lineChapter = match.groupValues[2].toIntOrNull()
                 val lineVerse = match.groupValues[3].toIntOrNull()
+                val lineRange = parseRange(lineChapter, lineVerse, match.groupValues[4])
                 // Match the requested granularity: verse refs require the
-                // chapter+verse pair, chapter refs require the chapter,
-                // book refs match on the book name alone.
-                val chapterOk = chapter == null || lineChapter == chapter
-                val verseOk = verse == null || lineVerse == verse
+                // chapter+verse pair (a range line matches any chapter /
+                // verse it covers, possibly across chapters), chapter refs
+                // require the chapter, book refs match on the book name
+                // alone. For ranged lines the chapter gate accepts any
+                // chapter inside the span — a `$Lukas&7&1-&8&1` chip must
+                // match a requested verse in chapter 8 too — and
+                // [rangeCovers] re-validates the exact (chapter, verse).
+                val chapterOk = when {
+                    chapter == null -> true
+                    lineChapter == chapter -> true
+                    lineRange != null ->
+                        chapter >= lineChapter!! && chapter <= lineRange.endChapter
+                    else -> false
+                }
+                val verseOk = when {
+                    verse == null -> true
+                    lineVerse == null -> false
+                    lineRange != null -> rangeCovers(
+                        lineChapter!!, lineVerse!!,
+                        lineRange.endChapter, lineRange.endVerse,
+                        chapter, verse
+                    )
+                    else -> lineVerse == verse
+                }
                 if (lineBook.equals(book, ignoreCase = true) && chapterOk && verseOk) {
                     return pos
                 }
@@ -60,13 +82,61 @@ internal fun findFirstReferenceOffset(
     // granularity rules. Tokens come back in document order, so the first
     // hit is the earliest occurrence.
     findReferenceTokens(source).forEach { token ->
-        val chapterOk = chapter == null || token.chapter == chapter
-        val verseOk = verse == null || token.verse == verse
+        // Same range-aware chapter gate as the whole-line path above:
+        // a ranged token (e.g. `$Lukas&7&1-&8&1`) covers every chapter
+        // in its span, not just its start chapter.
+        val chapterOk = when {
+            chapter == null -> true
+            token.chapter == chapter -> true
+            token.endVerse != null && token.chapter != null ->
+                chapter >= token.chapter && chapter <= (token.endChapter ?: token.chapter)
+            else -> false
+        }
+        val verseOk = when {
+            verse == null -> true
+            token.verse == null -> false
+            token.endVerse != null -> rangeCovers(
+                token.chapter ?: chapter ?: 0,
+                token.verse!!,
+                token.endChapter ?: token.chapter ?: chapter ?: 0,
+                token.endVerse!!,
+                chapter, verse
+            )
+            else -> token.verse == verse
+        }
         if (token.book.trim().equals(book, ignoreCase = true) && chapterOk && verseOk) {
             return token.sourceStart
         }
     }
     return null
+}
+
+
+/**
+ * True when the inclusive range [startChapter]:[startVerse] ..
+ * [endChapter]:[endVerse] covers the given (chapter, verse) — including
+ * cross-chapter ranges (e.g. a `$Lukas&7&1-&8&1` reference covers every
+ * verse from Luk 7:1 through Luk 8:1).
+ */
+private fun rangeCovers(
+    startChapter: Int,
+    startVerse: Int,
+    endChapter: Int,
+    endVerse: Int,
+    chapter: Int?,
+    verse: Int?
+): Boolean {
+    if (chapter == null || verse == null) return false
+    if (chapter < startChapter || chapter > endChapter) return false
+    return if (startChapter == endChapter) {
+        verse in startVerse..endVerse
+    } else if (chapter == startChapter) {
+        verse >= startVerse
+    } else if (chapter == endChapter) {
+        verse <= endVerse
+    } else {
+        true
+    }
 }
 
 
@@ -77,13 +147,30 @@ internal data class ReferenceMatch(
     val book: String,
     val chapter: Int?,
     val verse: Int?,
+    /**
+     * Chapter of the inclusive range end (see [data.ReferenceToken
+     * .endChapter]) — non-null together with [endVerse] when the
+     * reference carries a `+` / `-V2` / `-&C2&V2` suffix. Same-chapter
+     * ranges keep this equal to [chapter]; cross-chapter ranges (e.g.
+     * `$Lukas&7&1-&8&1`) store the larger chapter here. The chip renders
+     * as `Book C:V-E` or `Book C:V-C2:E` and Shift+click offers a picker
+     * over the range.
+     */
+    val endChapter: Int? = null,
+    /**
+     * Inclusive last verse of the extended range. Non-null whenever
+     * [endChapter] is.
+     */
+    val endVerse: Int? = null,
     val label: String? = null
 ) {
     /**
      * Human-readable form of this reference, matching the chip text the
-     * editor renders for a `$Book$C$V` line — e.g. `John 3:16`,
-     * `John 3` (chapter-only) or `John` (book-only). Used when copying
-     * a reference from the editor's right-click menu.
+     * editor renders for a `$Book&C&V` line — e.g. `John 3:16`,
+     * `John 3:16-22` (extended same-chapter range), `John 3:16-4:1`
+     * (cross-chapter range), `John 3` (chapter-only) or `John`
+     * (book-only). Used when copying a reference from the editor's
+     * right-click menu.
      */
     fun displayText(): String = buildString {
         append(book)
@@ -94,6 +181,14 @@ internal data class ReferenceMatch(
         if (verse != null) {
             append(':')
             append(verse)
+            if (endVerse != null) {
+                append('-')
+                if (endChapter != null && endChapter != chapter) {
+                    append(endChapter)
+                    append(':')
+                }
+                append(endVerse)
+            }
         }
     }
 }
@@ -134,11 +229,16 @@ internal fun buildReferenceLookup(text: String): ReferenceLookup {
         }
         val wholeLineMatch = referenceLineRegex.matchEntire(stripped)
         if (wholeLineMatch != null) {
+            val lineChapter = wholeLineMatch.groupValues[2].toIntOrNull()
+            val lineVerse = wholeLineMatch.groupValues[3].toIntOrNull()
+            val lineRange = parseRange(lineChapter, lineVerse, wholeLineMatch.groupValues[4])
             byLine[scan] = ReferenceMatch(
                 book = wholeLineMatch.groupValues[1].trim(),
-                chapter = wholeLineMatch.groupValues[2].toIntOrNull(),
-                verse = wholeLineMatch.groupValues[3].toIntOrNull(),
-                label = wholeLineMatch.groupValues[4].trim().ifBlank { null }
+                chapter = lineChapter,
+                verse = lineVerse,
+                endChapter = lineRange?.endChapter,
+                endVerse = lineRange?.endVerse,
+                label = wholeLineMatch.groupValues[5].trim().ifBlank { null }
             )
         } else if (coloredQuoteRegex.matchEntire(stripped) == null) {
             // Inline `$Book$C$V` tokens in ordinary lines. Colored-quote
@@ -220,7 +320,9 @@ internal fun findReferenceInLookup(lookup: ReferenceLookup, sourcePos: Int): Ref
                 ReferenceMatch(
                     book = token.book.trim(),
                     chapter = token.chapter,
-                    verse = token.verse
+                    verse = token.verse,
+                    endChapter = token.endChapter,
+                    endVerse = token.endVerse
                 )
             )
         }

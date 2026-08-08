@@ -45,7 +45,8 @@ import model.Verse
  * Word-style "Insert reference" picker. The user types a book name into a
  * field with autocomplete (suggestions filtered from the bundled Bible),
  * optionally narrows to a chapter / verse, and confirms with Insert or
- * Enter. Inserts `$Book$C$V ` / `$Book$C ` / `$Book ` at the caret.
+ * Enter. Inserts `$Book&C&V ` / `$Book&C ` / `$Book ` at the caret (the
+ * `&`-separated reference syntax the editor renders as a chip).
  */
 @Composable
 internal fun ReferenceInsertDialog(
@@ -142,11 +143,11 @@ internal fun ReferenceInsertDialog(
         append('$')
         append(selectedBook?.name ?: query)
         if (kind != ReferenceKind.BOOK) {
-            append('$')
+            append('&')
             append(chapterNumber ?: 1)
         }
         if (kind == ReferenceKind.VERSE) {
-            append('$')
+            append('&')
             append(verseNumber ?: 1)
         }
         append(' ')

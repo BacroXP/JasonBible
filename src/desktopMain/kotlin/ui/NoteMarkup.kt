@@ -22,8 +22,13 @@ internal const val RLM = "\u200F" // Right-to-Left Mark: toggles a line into RTL
 internal const val LRM = "\u200E" // Left-to-Right Mark: explicit LTR line marker
 
 internal val orderedListRegex = Regex("^\\d+\\.\\s+")
+// Groups: 1 = book, 2 = chapter, 3 = verse, 4 = optional verse-range
+// suffix (`+`, `+N`, `-V2`, `-&C2&V2`, … — resolved by data.parseRange),
+// 5 = optional trailing label. Parts are separated by `&` (or `$` for
+// notes written before the `&` syntax); a cross-chapter end is written
+// `-&C2&V2` (e.g. `$Lukas&7&1-&8&1` = Luk 7:1 to 8:1).
 internal val referenceLineRegex =
-    Regex("^\\\$([^\\\$]+)(?:\\\$(\\d+)(?:\\\$(\\d+)(?:\\s+(.*))?)?)?\\s*$")
+    Regex("^\\\$([^\\\$&]+)(?:[\\\$&](\\d+)(?:[\\\$&](\\d+)(\\+\\d*|-[\\\$&]?\\d+(?:[\\\$&]\\d+)?(?:\\+\\d*)?)?(?:\\s+(.*))?)?)?\\s*$")
 internal val coloredQuoteRegex =
     Regex("^\"(.+?)\"(?:\\[#([0-9A-Fa-f]{3,8})])?\\s*(.*)\$")
 

@@ -43,12 +43,14 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -104,8 +106,11 @@ internal fun EditorSurface(
      * plain text; for media references [anchor] is the tap point in
      * WINDOW px so the caller can anchor the in-app preview popup at the
      * chip (Bible taps pass Offset.Zero — the caller navigates instead).
+     * [shiftPressed] is true when the Shift key was held during the tap
+     * (an extended range chip then shows its verse picker instead of
+     * jumping straight to the start verse).
      */
-    onTapReference: (ReferenceHit?, anchor: Offset) -> Unit,
+    onTapReference: (ReferenceHit?, anchor: Offset, shiftPressed: Boolean) -> Unit,
     onHoverBibleReference: (BibleReferenceSelection?) -> Unit,
     /**
      * Double-click word selection. `start` and `end` are source-text
@@ -154,6 +159,10 @@ internal fun EditorSurface(
     // to convert the px press position to the DpOffset the DropdownMenu
     // anchors at.
     val density = LocalDensity.current
+    // Live keyboard state (Shift detection for the verse-range picker).
+    // Same hoisting rationale: LocalWindowInfo.current is a @Composable
+    // call, so it must be captured before the pointerInput lambdas.
+    val windowInfo = LocalWindowInfo.current
 
     // Shared reference hit-test: map a Box-local pointer position to the
     // ReferenceHit under it (or null). Used by tap, double-tap, the
@@ -207,10 +216,15 @@ internal fun EditorSurface(
                         onTap = { tapPos ->
                             // Window anchor = editor origin + Box-local tap
                             // point, so the caller can pop a preview next
-                            // to the tapped chip.
+                            // to the tapped chip. `windowInfo` tracks the
+                            // live keyboard state (incl. Shift) so a
+                            // Shift+tap on an extended reference chip can
+                            // open the verse-range picker instead of
+                            // navigating straight away.
                             onTapReference(
                                 resolveReferenceAt(tapPos),
-                                editorWindowPos + tapPos
+                                editorWindowPos + tapPos,
+                                windowInfo.keyboardModifiers.isShiftPressed
                             )
                         },
                         onDoubleTap = { tapPos ->
@@ -418,7 +432,7 @@ internal fun EditorSurface(
                                 onClick = {
                                     SoundManager.play(SoundEvent.Click)
                                     referenceMenu = null
-                                    onTapReference(hit, Offset.Zero)
+                                    onTapReference(hit, Offset.Zero, false)
                                 }
                             )
                             DropdownMenuItem(

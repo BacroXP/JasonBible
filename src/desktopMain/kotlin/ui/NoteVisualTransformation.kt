@@ -13,6 +13,7 @@ import data.MediaReferenceToken
 import data.ReferenceToken
 import data.findMediaReferenceTokens
 import data.findReferenceTokens
+import data.parseRange
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
@@ -351,14 +352,27 @@ internal class NoteVisualTransformation(
                     val book = refMatch.groupValues[1]
                     val chapter = refMatch.groupValues[2].takeIf { it.isNotEmpty() }
                     val verse = refMatch.groupValues[3].takeIf { it.isNotEmpty() }
+                    val chapterNum = chapter?.toIntOrNull()
+                    val verseNum = verse?.toIntOrNull()
+                    // Resolve the optional range suffix (`+`, `+N`, `-V2`,
+                    // `-&C2&V2`, …) to an inclusive end so the chip reads
+                    // as a real range ("John 3:16-22", "Luk 7:1-8:1")
+                    // instead of the raw shorthand. A captured suffix that
+                    // does not resolve (e.g. a backward `-7` after verse
+                    // 16) is shown VERBATIM as plain text after the chip.
+                    val range = refMatch.groupValues[4]
+                    val rangeResolved = if (verseNum != null) {
+                        parseRange(chapterNum, verseNum, range)
+                    } else null
                     val contentStart = lineStart + analysis.hiddenLen
 
-                    // Everything after the verse digits (label + trailing
-                    // whitespace) is emitted verbatim.
+                    // Source offset just after the verse digits (before
+                    // the range suffix); everything from there on is
+                    // emitted outside the chip.
                     val headEnd = contentStart + 1 + book.length +
                         (if (chapter != null) 1 + chapter.length else 0) +
                         (if (verse != null) 1 + verse.length else 0)
-                    val tail = source.substring(headEnd, lineEnd)
+                    val tailStart = headEnd + range.length
 
                     visibleText = buildString {
                         append(book)
@@ -369,8 +383,18 @@ internal class NoteVisualTransformation(
                         if (verse != null) {
                             append(':')
                             append(verse)
+                            if (rangeResolved != null) {
+                                append('-')
+                                if (rangeResolved.endChapter != chapterNum) {
+                                    append(rangeResolved.endChapter)
+                                    append(':')
+                                }
+                                append(rangeResolved.endVerse)
+                            } else if (range.isNotEmpty()) {
+                                append(range)
+                            }
                         }
-                        append(tail)
+                        append(source.substring(tailStart, lineEnd))
                     }
                     out.append(visibleText)
 
@@ -468,15 +492,50 @@ internal class NoteVisualTransformation(
                         )
                         src += verse.length
                         dst += verse.length
+                        // Range suffix `+` / `-V2` / `-&C2&V2` → `-E` or
+                        // `-C2:E` (resolved end). One span covers the whole
+                        // raw suffix; its delta absorbs the length
+                        // difference so cursor / tap offsets round-trip.
+                        // A captured suffix that does not resolve is kept
+                        // as plain verbatim text with an identity span.
+                        if (rangeResolved != null) {
+                            val cross = rangeResolved.endChapter != chapterNum
+                            val suffixDstLen = 1 +
+                                (if (cross) rangeResolved.endChapter.toString().length + 1 else 0) +
+                                rangeResolved.endVerse.toString().length
+                            ranges.add(
+                                MappingSpan(
+                                    originalStart = src,
+                                    originalEnd = src + range.length,
+                                    transformedStart = dst,
+                                    transformedEnd = dst + suffixDstLen,
+                                    delta = range.length - suffixDstLen
+                                )
+                            )
+                            src += range.length
+                            dst += suffixDstLen
+                        } else if (range.isNotEmpty()) {
+                            ranges.add(
+                                MappingSpan(
+                                    originalStart = src,
+                                    originalEnd = src + range.length,
+                                    transformedStart = dst,
+                                    transformedEnd = dst + range.length,
+                                    delta = 0
+                                )
+                            )
+                            src += range.length
+                            dst += range.length
+                        }
                     }
                     // Label + trailing whitespace (verbatim).
-                    if (headEnd < lineEnd) {
+                    if (tailStart < lineEnd) {
                         ranges.add(
                             MappingSpan(
-                                originalStart = headEnd,
+                                originalStart = tailStart,
                                 originalEnd = lineEnd,
                                 transformedStart = dst,
-                                transformedEnd = dst + (lineEnd - headEnd),
+                                transformedEnd = dst + (lineEnd - tailStart),
                                 delta = 0
                             )
                         )
@@ -621,6 +680,41 @@ internal class NoteVisualTransformation(
                                     )
                                     src += digits.length
                                     dst += digits.length
+                                    // Range suffix `+` / `-V2` / `-&C2&V2`
+                                    // → `-E` or `-C2:E` (resolved end). The
+                                    // raw suffix occupies the token chars
+                                    // between the verse digits and
+                                    // [token.sourceEnd]; one MappingSpan
+                                    // covers it, its delta absorbing the
+                                    // display length difference. (The inline
+                                    // scanner only consumes ranges that
+                                    // resolve, so `token.endVerse != null`
+                                    // implies a valid suffix here.)
+                                    if (token.endVerse != null) {
+                                        val cross = token.endChapter != null &&
+                                            token.endChapter != token.chapter
+                                        val suffixSrcLen = tEnd - src
+                                        val suffixDstLen = 1 +
+                                            (if (cross) token.endChapter.toString().length + 1 else 0) +
+                                            token.endVerse.toString().length
+                                        display.append('-')
+                                        if (cross) {
+                                            display.append(token.endChapter.toString())
+                                            display.append(':')
+                                        }
+                                        display.append(token.endVerse.toString())
+                                        ranges.add(
+                                            MappingSpan(
+                                                src,
+                                                src + suffixSrcLen,
+                                                dst,
+                                                dst + suffixDstLen,
+                                                delta = suffixSrcLen - suffixDstLen
+                                            )
+                                        )
+                                        src += suffixSrcLen
+                                        dst += suffixDstLen
+                                    }
                                 }
                                 lineChipRanges.add(chipStart until dst)
                             }
@@ -763,11 +857,25 @@ internal class NoteVisualTransformation(
             val book = match.groupValues[1]
             val chapter = match.groupValues[2].takeIf { it.isNotEmpty() }
             val verse = match.groupValues[3].takeIf { it.isNotEmpty() }
+            val chapterNum = chapter?.toIntOrNull()
             // Display length of the "Book C:V" chip: book name plus a
-            // space before the chapter and a colon before the verse.
+            // space before the chapter, a colon before the verse, and —
+            // for extended ranges — a hyphen plus the resolved end
+            // ("Book 3:16-22" same chapter, "Book 7:1-8:1" cross
+            // chapter).
             var refLen = book.length
             if (chapter != null) refLen += 1 + chapter.length
-            if (verse != null) refLen += 1 + verse.length
+            if (verse != null) {
+                refLen += 1 + verse.length
+                val resolved = parseRange(chapterNum, verse.toIntOrNull(), match.groupValues[4])
+                if (resolved != null) {
+                    refLen += 1
+                    if (resolved.endChapter != chapterNum) {
+                        refLen += resolved.endChapter.toString().length + 1
+                    }
+                    refLen += resolved.endVerse.toString().length
+                }
+            }
             return LineAnalysis(
                 kind = BlockKind.REFERENCE,
                 hiddenLen = 0,

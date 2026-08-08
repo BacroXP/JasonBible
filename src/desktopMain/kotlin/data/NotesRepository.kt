@@ -523,10 +523,13 @@ object NotesRepository {
     )
 
 
-    // Three granularities: `$Book`, `$Book$C` and `$Book$C$V` (the
-    // latter optionally followed by a free-text label).
+    // Three granularities: `$Book`, `$Book&C` and `$Book&C&V` (the
+    // latter optionally followed by a verse-range suffix and / or a
+    // free-text label). Parts are separated by `&` or `$` (the `$` form
+    // is accepted so notes written before the `&` syntax keep parsing);
+    // groups: 1 = book, 2 = chapter, 3 = verse, 4 = label.
     private val referenceRegex =
-        Regex("^\\$([^\\$]+)(?:\\$(\\d+)(?:\\$(\\d+)(?:\\s+(.*))?)?)?\\s*$")
+        Regex("^\\$([^\\$&]+)(?:[\\$&](\\d+)(?:[\\$&](\\d+)(?:\\+\\d*|-[\\$&]?\\d+(?:[\\$&]\\d+)?(?:\\+\\d*)?)?(?:\\s+(.*))?)?)?\\s*$")
 
     private val quoteRegex =
         Regex("^\"(.+?)\"(?:\\[#([0-9A-Fa-f]{3,8})])?\\s*(.*)$")
