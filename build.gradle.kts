@@ -92,3 +92,81 @@ compose.desktop {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// File-size guard: blocks local builds when any project file exceeds the
+// configured hard limit, mirroring the CI `check-file-sizes` job in
+// .github/workflows/release.yml. This keeps a local build from ever
+// succeeding on a tree that GitHub would reject (or that would bloat the
+// installers).
+//
+// Note: the local limit (50 MB) is deliberately stricter than the CI hard
+// limit (100 MB) — see the CI job for its own 100/50 MB thresholds. Both
+// are overridable, e.g.:
+//   ./gradlew build -PfileSizeHardLimitMb=100
+// ---------------------------------------------------------------------------
+val fileSizeHardLimitMb: Int =
+    (findProperty("fileSizeHardLimitMb") as String?)?.toIntOrNull() ?: 50
+// Warn at 80% of the hard limit (40 MB by default) — high enough that the
+// existing ~30 MB translation files don't warn on every build.
+val fileSizeWarnLimitMb: Int =
+    (findProperty("fileSizeWarnLimitMb") as String?)?.toIntOrNull()
+        ?: (fileSizeHardLimitMb * 4) / 5
+
+fun formatFileSize(bytes: Long): String =
+    "%.1f MB".format(bytes / (1024.0 * 1024.0))
+
+val checkFileSizes by tasks.registering {
+    group = "verification"
+    description =
+        "Fails the build if any project file exceeds the $fileSizeHardLimitMb MB size limit."
+
+    doLast {
+        val hardLimit = fileSizeHardLimitMb * 1024L * 1024L
+        val warnLimit = fileSizeWarnLimitMb * 1024L * 1024L
+        val offenders = mutableListOf<String>()
+        val warnings = mutableListOf<String>()
+
+        project.fileTree(projectDir) {
+            exclude(
+                "**/.git/**",
+                "**/.gradle/**",
+                "**/.idea/**",
+                "**/.kotlin/**",
+                "**/build/**"
+            )
+        }.files.sortedByDescending { it.length() }.forEach { file ->
+            val size = file.length()
+            if (size > hardLimit) {
+                offenders += "${file.relativeTo(projectDir)} (${formatFileSize(size)})"
+            } else if (size > warnLimit) {
+                warnings += "${file.relativeTo(projectDir)} (${formatFileSize(size)})"
+            }
+        }
+
+        warnings.forEach { file ->
+            logger.warn("File-size guard: $file is approaching the $fileSizeWarnLimitMb MB warning level.")
+        }
+        if (offenders.isNotEmpty()) {
+            throw GradleException(
+                "Build blocked: file(s) exceed the $fileSizeHardLimitMb MB limit:\n" +
+                    offenders.joinToString("\n") +
+                    "\nMove them out of the repo (e.g. attach them to a GitHub Release instead) and rebuild."
+            )
+        }
+    }
+}
+
+// The guard runs before anything that produces a distributable artifact
+// (and before `build`), so an oversized file stops the build early. The
+// matching is tolerant of tasks that don't exist on this host OS.
+tasks.matching {
+    it.name in setOf(
+        "build",
+        "createDistributable",
+        "createReleaseDistributable",
+        "packageDeb",
+        "packageMsi",
+        "packageDmg"
+    )
+}.configureEach { dependsOn(checkFileSizes) }
