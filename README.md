@@ -1,154 +1,124 @@
+<div align="center">
+
+<img src="src/desktopMain/resources/icons/Icon-512.png" width="110" alt="BibleApp icon"/>
+
 # 📖 BibleApp
 
-A fast, offline **Bible reading & note-taking desktop app** built with Kotlin and
-Compose Multiplatform (Desktop). Read the Luther 1912 translation, take richly
-formatted notes, and study with confidence — no internet connection required.
+**A fast, fully offline Bible reader & note-taking app for Linux, Windows & macOS.**
+
+90+ translations · 52 languages · word study with Strong's numbers · rich notes editor
+
+[![Latest release](https://img.shields.io/github/v/release/BacroXP/JasonBible?label=release&color=informational)](https://github.com/BacroXP/JasonBible/releases)
+[![CI — Build & Release](https://github.com/BacroXP/JasonBible/actions/workflows/release.yml/badge.svg)](https://github.com/BacroXP/JasonBible/actions)
+[![Stars](https://img.shields.io/github/stars/BacroXP/JasonBible)](https://github.com/BacroXP/JasonBible)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+**[⬇️ Download](#download)** · **[✨ Features](#features)** · **[⌨️ Shortcuts](#keyboard-shortcuts)** · **[🚀 Build & Run](#build--run)** · **[📸 Screenshots](#screenshots)** · **[🔗 Links](#links)**
+
+</div>
 
 ---
+
+## ⬇️ Download
+
+Grab the installer for your platform from the
+**[Releases](https://github.com/BacroXP/JasonBible/releases)** page — every release
+ships all three, built automatically by CI on each native OS:
+
+| Platform | Installer | Install with |
+|----------|-----------|--------------|
+| 🐧 Linux | `.deb` | `sudo apt install ./bibleapp_<version>_amd64.deb` (or the apt repo below) |
+| 🪟 Windows | `.msi` | double-click the installer |
+| 🍎 macOS | `.dmg` | open and drag to *Applications* |
+
+> Installers aren't committed to the repo (they'd exceed GitHub's per-file limit) —
+> they're attached to each release instead. No internet is needed after install:
+> every translation ships inside the app.
+
+### 🐧 Linux — apt repository (recommended)
+
+Add the BibleApp apt repo once, then install and update like any other package:
+
+```bash
+echo "deb [trusted=yes] https://BacroXP.github.io/JasonBible/apt ./" | sudo tee /etc/apt/sources.list.d/bibleapp.list
+sudo apt update
+sudo apt install bibleapp
+```
+
+Upgrade to new versions with `sudo apt upgrade bibleapp`.
+
+> The repo is **unsigned**, hence the `[trusted=yes]` flag — packages are still
+> checksum-verified against the index (SHA256), and the index itself points at
+> the matching GitHub Release `.deb`. `apt update` may print a warning about a
+> missing *Release* file — expected for an unsigned flat repo, harmless.
 
 ## ✨ Features
 
-### 📖 Bible reading
-- Complete offline **Luther 1912** translation (all 66 books)
-- Book / chapter / verse navigation with a quick-reference selection dialog
-- Full-text **search across the whole Bible** (Ctrl+F): results grouped by book, step through matches with the prev/next buttons (or Enter / Shift+Enter), click a match to jump straight to the verse. **Aa** (match case) and **abc** (whole word) toggles, a scope filter (**All / This book / This chapter**), a **recent-queries** dropdown on the search icon (click to re-run), and the last query + toggles are remembered across restarts. Queries shaped like a Strong's number (`G25`, `H1`) run a **reverse concordance** lookup listing every verse containing that word-study token
-- **Word study** with Strong's numbers: in the bundled *KJV with Strongs* and *TR Parsed* (parsed Greek NT) translations every word is clickable — tap a `G`/`H` number to see its definition, root, transliteration and pronunciation (offline Strong's concordance). In the Greek module the **TVM codes** are clickable too, revealing each verb's tense / voice / mood breakdown
-- **Copy a verse, chapter or verse range** (hover a verse → 📋 Copy; chapter header → 📋 Copy chapter + a More ▾ menu with **Copy verse range…** and **Export chapter as PDF…**): e.g. `John 3:16 — For God so loved…` or a whole chapter as `John 3` with numbered verses. An optional setting appends the translation name (e.g. `… (Luther Bible 1912)`)
-- **Interlinear view**: the **ΑΩ** header toggle cycles three modes — off, the matching Greek TR verse (bundled `trparsed` module) beneath each New-Testament verse, and **word-aligned** (ΑΩ≡): Greek tokens paired column-by-column with the English word sharing their Strong's number (needs a Strong's-tagged translation like *KJV with Strongs*). Clickable numbers feed the word-study panel in every mode
-- **Ctrl+G jump-to-verse** dialog (book autocomplete + chapter / optional verse), and **← / → back-forward history** in the Bible pane header
-- **Whole-book continuous reading**: open a book's chapter list → “Read whole book →” to scroll the entire book as one passage (the interlinear mode carries over, so Greek lines / word-aligned columns and word study stay consistent with the chapter view)
-- **365-day reading plan** on Home with today's deterministic chapter assignments, overall progress bar and one-tap “mark today as read”
-- **Daily verse** on Home: a date-seeded verse from the active translation (changes each day), with a one-click jump to read it in the Bible
-- Verse highlighting with 5 marker colors, plus **tags** per verse
-- Read-tracking: mark chapters as read and see your progress
-- Star your favourite books and chapters
-- Split view: read and take notes side by side
+| 📖 Read & study | 📝 Notes & organize |
+|---|---|
+| **90+ translations in 52 languages** — from Luther 1912 to the Greek & Hebrew originals, switchable in Settings | Word-style **ribbon toolbar** with Home / Insert / Layout tabs |
+| **Word study with Strong's numbers** — tap any `G`/`H` number for the definition, root & pronunciation; Greek **TVM codes** explain tense / voice / mood | Rich formatting: **H1/H2 headings, quotes, highlights, lists, bold / italic / underline** |
+| **Interlinear view (ΑΩ)** — matching Greek beneath each verse, or **word-aligned** columns paired by Strong's number | **Media references** — `@youtube:…`, `@spotify:…`, `@url:…` render as chips with an in-app preview panel |
+| **Full-text Bible search (Ctrl+F)** — grouped by book, case/whole-word toggles, scope filter, plus **Strong's reverse concordance** (`G25`, `H1`) | **Global notes search (Ctrl+Shift+F)** — full-text across every note, click-to-open |
+| **Jump to any verse (Ctrl+G)** with book autocomplete, plus ← / → history | **`$Joh` inline autocomplete** — type a book and complete the reference |
+| Whole-book **continuous reading** mode | Copy verses/ranges, **export chapters & notes to PDF** |
+| **365-day reading plan** with progress, plus a daily verse on Home | Auto-save to disk · undo/redo · find & replace |
+| Verse highlighting (5 colors), tags, read-tracking & favorites | Notes are plain `.note` files in `~/.bibleapp/notes` |
+| **Split view** — read and take notes side by side | Dark / light theme, zoom (75–200 %), sound effects, DE / EN UI |
 
-### 📝 Notes & editor
-- Word-style **ribbon toolbar** with collapsible **Home / Insert / Layout** tabs
-- Custom icon set for every toolbar action
-- **Rich note format**: headings (H1/H2), quotes, coloured highlights, bullet &
-  numbered lists, bold / italic / underline, and Bible reference placeholders
-- **Media references**: `@youtube:dQw4w9WgXcQ`, `@spotify:track:4cOdon…`,
-  `@vimeo:123456789`, `@soundcloud:https://…` or `@url:https://…` render as
-  clickable chips — tapping one opens an **in-app preview panel** (title +
-  thumbnail fetched from the service's public oEmbed endpoint, no API keys)
-  with **Open in browser** / **Copy link**, and right-click offers the same
-  actions. The Insert ribbon's ▶️ button opens a picker that validates the
-  ID / URL before inserting. YouTube ids may carry a `?t=` timestamp
-- **Styles dropdown** (Normal / H1 / H2 / Quote) applied to the current line
-- Live **zoom slider** in the status bar (75 % – 200 %), persisted across runs
-- Undo / redo, find & replace, select all, clipboard integration
-- **Global notes search** (Ctrl+Shift+F): full-text scan across every note with previews and click-to-open at the matching line
-- **Inline reference autocomplete**: type `$Joh` and matching book names appear as chips — Enter, Tab or a click completes the reference
-- Auto-save to disk, plus **Ctrl+S** to save manually
-- Notes are plain `.note` files in `~/.bibleapp/notes` — the sidebar watches the
-  folder, so adding/removing files shows up instantly
-- Create, delete (with confirmation) and export notes as **PDF**
+## ⌨️ Keyboard shortcuts
 
-### ⚙️ App
-- Dark / light theme, fullscreen & window settings
-- Adjustable split ratio and pane widths
-- Sound effects (toggleable)
-- German / English UI
+| Shortcut | Action | Shortcut | Action |
+|----------|--------|----------|--------|
+| `Ctrl+F` | Find — Bible search / in-note find | `Ctrl+Shift+F` | Global notes search |
+| `Ctrl+H` | Find & replace | `Ctrl+G` | Jump to verse |
+| `Ctrl+K` | Insert Bible reference | `Ctrl+Shift+K` | Insert book reference |
+| `Ctrl+S` | Save note | `Ctrl+P` | Export note to PDF |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo | `Ctrl+A` | Select all |
+| `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Bold / italic / underline | `Ctrl+←` / `Ctrl+→` | Jump word (add `Shift` to select) |
+| `Ctrl+W` | Back / close | `Esc` | Close search / find bar |
 
----
+## 🚀 Build & Run
 
-## 🚀 Getting started
-
-### Requirements
-- **Java 17+** (JDK)
-
-### Run from source
+Requires **Java 17+** (JDK).
 
 ```bash
 git clone https://github.com/BacroXP/JasonBible.git
 cd JasonBible
-./gradlew run
+
+./gradlew run            # run from source
+./gradlew desktopTest    # run the unit tests
+./gradlew packageDeb     # build the Linux .deb (packageDmg / packageMsi on macOS / Windows)
 ```
 
-### Download installers
+Output lands in `build/compose/binaries/main/`. Shipping a new version?
+Follow **[RELEASING.md](RELEASING.md)** — commit, tag `vX.Y.Z`, and CI builds &
+attaches all three installers to a new release automatically.
 
-Ready-to-install packages are attached to every
-[**Release**](https://github.com/BacroXP/JasonBible/releases) — grab the
-`.deb` (Linux), `.msi` (Windows) or `.dmg` (macOS) for your platform there.
+## 📸 Screenshots
 
-The Linux package installs with:
+*On the way 🚧* — drop real screenshots into `docs/screenshots/` and reference
+them here, e.g.:
 
-```bash
-sudo apt install ./bibleapp_1.0.0_amd64.deb
+```html
+<img src="docs/screenshots/home.png" alt="Home" width="70%">
+<img src="docs/screenshots/word-study.png" alt="Word study" width="70%">
 ```
 
-(Pre-built installers are intentionally not committed to the repository —
-they are too large for GitHub's 100 MB per-file limit and would bloat every
-clone. Build your own with `./gradlew packageDeb` instead, see below.)
+## 🗂 Where things live
 
-### Installers for all platforms
+| What | Where |
+|------|-------|
+| Settings | `~/.bibleapp/private.json` |
+| Notes | `~/.bibleapp/notes/*.note` |
+| Translations | `src/desktopMain/resources/bible/` (auto-detected on startup) |
 
-Every **release** on the [Releases](https://github.com/BacroXP/JasonBible/releases) page ships an installer
-for each platform, built automatically by GitHub Actions on its native OS:
+## 🔗 Links
 
-| Platform | File | Built on |
-|----------|------|----------|
-| Linux | `.deb` | Ubuntu runner |
-| Windows | `.msi` | Windows runner (WiX) |
-| macOS | `.dmg` | macOS runner |
-
-Each format is only buildable on its own OS (the Compose Gradle plugin can't
-cross-compile MSI / DMG), so the CI workflow builds all three in parallel and
-attaches them to the release.
-
-Shipping a new version? Follow the step-by-step tutorial:
-**[RELEASING.md](RELEASING.md)** — commit, tag `vX.Y.Z`, and the pipeline
-builds & attaches the installers automatically.
-
-### Build a release locally
-
-```bash
-# Linux .deb
-./gradlew packageDeb
-# macOS .dmg (requires macOS)
-./gradlew packageDmg
-# Windows .msi (requires Windows)
-./gradlew packageMsi
-```
-
-The `.deb` is written to `build/compose/binaries/main/deb/`.
-
-### Run the tests
-
-```bash
-./gradlew desktopTest
-```
-
-Unit tests cover the pure logic: Bible search matching (whole-word, case,
-Strong's reverse concordance, the book/chapter scope slices), the 365-day
-reading plan (determinism, full canon coverage, date→day mapping), the
-editor's `$Book` reference-prefix scan, and the copy-range formatter.
-Tests redirect `user.home` to a throwaway directory, so your real
-`~/.bibleapp` settings are never read or written.
-
----
-
-## 🗂 Data
-
-- Settings: `~/.bibleapp/private.json`
-- Notes: `~/.bibleapp/notes/*.note`
-- Bibles: `src/desktopMain/resources/bible/<Sprache>-<Name>/*.json` im SWORD-Format
-  (`{"metadata":…, "verses":[…]}`). Alle vorhandenen Module werden beim Start
-  automatisch erkannt und lassen sich in den **Einstellungen → Bible preferences**
-  (Sprache + Übersetzung) umschalten. Neue Module einfach in den Ordner legen.
-  Referenzen in Notizen (`$Lukas$3$16`) bleiben dank der sprachübergreifenden
-  Buchnamen-Zuordnung (`Extras/books_*.json`) auch nach einem Sprachwechsel gültig.
-
----
-
-## 🛠 Tech
-
-- [Kotlin](https://kotlinlang.org) 2.2
-- [Compose Multiplatform](https://www.jetbrains.com/lp/compose-multiplatform/) 1.9 (Material 3)
-- kotlinx-serialization, kotlinx-coroutines
-- Apache PDFBox (note → PDF export)
+- **⬇️ Releases & installers** — https://github.com/BacroXP/JasonBible/releases
+- **🛠 CI pipeline** — https://github.com/BacroXP/JasonBible/actions
+- **📦 Release guide** — [RELEASING.md](RELEASING.md)
+- **🧱 Tech stack** — [Kotlin](https://kotlinlang.org) 2.2 · [Compose Multiplatform](https://www.jetbrains.com/lp/compose-multiplatform/) 1.9 (Material 3) · kotlinx-serialization · Apache PDFBox
 
 ## 📄 License
 
