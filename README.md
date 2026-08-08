@@ -2,7 +2,7 @@
 
 <img src="src/desktopMain/resources/icons/Icon-512.png" width="110" alt="BibleApp icon"/>
 
-# 📖 JasonBible
+# JasonBible
 
 **A fast, fully offline Bible reader & note-taking app for Linux, Windows & macOS.**
 
