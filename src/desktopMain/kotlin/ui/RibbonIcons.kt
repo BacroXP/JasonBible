@@ -52,6 +52,10 @@ object RibbonIcons {
     // the Book icon (closed book) so the three granularity buttons are
     // visually distinguishable.
     val Chapter: ImageVector by lazy { icon("Chapter", "M20,3H6C4.9,3 4,3.9 4,5v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V5C22,3.9 21.1,3 20,3zM12,6h7v2h-7V6zM12,10h7v2h-7V10zM12,14h5v2h-5V14zM7,5c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1zM7,9c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1zM7,13c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1z") }
+    // Media link (YouTube / Spotify / …): a film-strip glyph, distinct
+    // from the Bible Reference icon so the two insert buttons read as
+    // different actions.
+    val Media: ImageVector by lazy { icon("Media", "M18,4l2,4h-3l-2,-4h-2l2,4h-3l-2,-4H8l2,4H7L5,4H4C2.9,4 2,4.9 2,6v12c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V4H18z") }
     val Date: ImageVector by lazy { icon("Date", "M9,11H7v2h2V11zM13,11h-2v2h2V11zM17,11h-2v2h2V11zM19,4h-1V2h-2v2H8V2H6v2H5C3.89,4 3.01,4.9 3.01,6L3,20c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V6C21,4.9 20.1,4 19,4zM19,20H5V9h14V20z") }
 
     // ---- Find / replace bar --------------------------------------------

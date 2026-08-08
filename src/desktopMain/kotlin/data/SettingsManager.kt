@@ -47,7 +47,37 @@ private data class PrivateSettings(
     // ~/.bibleapp/notes. Guards NotesRepository against re-seeding the
     // sample whenever the notes folder happens to be empty (e.g. after
     // the user deletes every note) — seeding happens exactly once.
-    val notesInitialized: Boolean = false
+    val notesInitialized: Boolean = false,
+    // Last Bible full-text search session, persisted so reopening the
+    // search bar (Ctrl+F) resumes exactly where the user left off:
+    // the query text and the two matching toggles (Aa / whole word).
+    val bibleSearchQuery: String = "",
+    val bibleSearchMatchCase: Boolean = false,
+    val bibleSearchWholeWord: Boolean = false,
+    // Recently used Bible search queries (most recent first, capped at
+    // [MAX_BIBLE_SEARCH_RECENTS]), shown in a dropdown on the search bar.
+    val bibleSearchRecents: List<String> = emptyList(),
+    // When true, copied verses / chapters / ranges include the active
+    // translation's display name, e.g. "John 3:16 — … (Luther Bible 1912)".
+    val copyWithTranslationName: Boolean = false,
+    // Global Ctrl+F search thresholds: a Bible book is shown at book level
+    // once the search term appears at least [searchBookThreshold] times in
+    // it, and a chapter is shown at chapter level (instead of as individual
+    // verses) once it appears at least [searchChapterThreshold] times in
+    // that chapter. Sub-threshold books/chapters appear as "lone"
+    // chapters/verses at the end of the results.
+    val searchBookThreshold: Int = 5,
+    val searchChapterThreshold: Int = 3,
+    // Last global search session, persisted so reopening the search
+    // (Ctrl+F) or restarting the app resumes exactly where the user left
+    // off: the query text and the Aa (match case) / abc (whole word)
+    // toggles.
+    val globalSearchQuery: String = "",
+    val globalSearchMatchCase: Boolean = false,
+    val globalSearchWholeWord: Boolean = false,
+    // Recently used global search queries (most recent first, capped at
+    // [MAX_GLOBAL_SEARCH_RECENTS]), shown in a dropdown on the search icon.
+    val globalSearchRecents: List<String> = emptyList()
 )
 
 
@@ -99,9 +129,30 @@ object SettingsManager {
     private val editorMaxWidthState = mutableStateOf(980.dp)
     private val editorFontScaleState = mutableStateOf(1f)
     private val notesInitializedState = mutableStateOf(false)
+    private val bibleSearchQueryState = mutableStateOf("")
+    private val bibleSearchMatchCaseState = mutableStateOf(false)
+    private val bibleSearchWholeWordState = mutableStateOf(false)
+    private val bibleSearchRecentsState = mutableStateOf<List<String>>(emptyList())
+    private val copyWithTranslationNameState = mutableStateOf(false)
+    private val searchBookThresholdState = mutableStateOf(5)
+    private val searchChapterThresholdState = mutableStateOf(3)
+    private val globalSearchQueryState = mutableStateOf("")
+    private val globalSearchMatchCaseState = mutableStateOf(false)
+    private val globalSearchWholeWordState = mutableStateOf(false)
+    private val globalSearchRecentsState = mutableStateOf<List<String>>(emptyList())
 
     private const val MIN_SPLIT_RATIO = 0.2f
     private const val MAX_SPLIT_RATIO = 0.8f
+
+    // Global-search promotion thresholds, clamped to a sane range.
+    private const val MIN_SEARCH_THRESHOLD = 1
+    private const val MAX_SEARCH_THRESHOLD = 30
+
+    /** How many recent Bible search queries are remembered. */
+    private const val MAX_BIBLE_SEARCH_RECENTS = 10
+
+    /** How many recent global search queries are remembered. */
+    private const val MAX_GLOBAL_SEARCH_RECENTS = 10
 
     private const val MIN_MAX_WIDTH = 480f
     private const val MAX_MAX_WIDTH = 1800f
@@ -249,6 +300,164 @@ object SettingsManager {
                 save()
             }
         }
+
+    /**
+     * Persisted Bible full-text search query. Written on every keystroke
+     * while the search bar is open; restored the next time the bar opens
+     * (BibleScreen seeds its state from this in `remember`).
+     */
+    var bibleSearchQuery: String
+        get() = bibleSearchQueryState.value
+        set(value) {
+            if (bibleSearchQueryState.value != value) {
+                bibleSearchQueryState.value = value
+                save()
+            }
+        }
+
+    /** Persisted "Aa" (match case) toggle for the Bible search bar. */
+    var bibleSearchMatchCase: Boolean
+        get() = bibleSearchMatchCaseState.value
+        set(value) {
+            if (bibleSearchMatchCaseState.value != value) {
+                bibleSearchMatchCaseState.value = value
+                save()
+            }
+        }
+
+    /** Persisted whole-word toggle for the Bible search bar. */
+    var bibleSearchWholeWord: Boolean
+        get() = bibleSearchWholeWordState.value
+        set(value) {
+            if (bibleSearchWholeWordState.value != value) {
+                bibleSearchWholeWordState.value = value
+                save()
+            }
+        }
+
+    /** Persisted recently-used Bible search queries (most recent first). */
+    var bibleSearchRecents: List<String>
+        get() = bibleSearchRecentsState.value
+        set(value) {
+            if (bibleSearchRecentsState.value != value) {
+                bibleSearchRecentsState.value = value
+                save()
+            }
+        }
+
+    /**
+     * Record a Bible search query as recently used: de-duplicates
+     * case-insensitively (keeping the newest spelling), moves it to the
+     * front and caps the list at [MAX_BIBLE_SEARCH_RECENTS]. Blank
+     * queries are ignored.
+     */
+    fun addBibleSearchRecent(query: String) {
+        val q = query.trim()
+        if (q.isEmpty()) return
+        val updated = listOf(q) + bibleSearchRecentsState.value
+            .filter { !it.equals(q, ignoreCase = true) }
+        bibleSearchRecents = updated.take(MAX_BIBLE_SEARCH_RECENTS)
+    }
+
+    /**
+     * Whether copied verses / chapters / ranges carry the active
+     * translation's display name (e.g. "… (Luther Bible 1912)").
+     */
+    var copyWithTranslationName: Boolean
+        get() = copyWithTranslationNameState.value
+        set(value) {
+            if (copyWithTranslationNameState.value != value) {
+                copyWithTranslationNameState.value = value
+                save()
+            }
+        }
+
+    /**
+     * Global search: minimum times the term must appear in a book before
+     * the book is shown at book level (instead of as lone chapters /
+     * verses). Name-matched books always win promotion regardless.
+     */
+    var searchBookThreshold: Int
+        get() = searchBookThresholdState.value
+        set(value) {
+            val clamped = value.coerceIn(MIN_SEARCH_THRESHOLD, MAX_SEARCH_THRESHOLD)
+            if (searchBookThresholdState.value != clamped) {
+                searchBookThresholdState.value = clamped
+                save()
+            }
+        }
+
+    /**
+     * Global search: minimum times the term must appear in a chapter
+     * before the chapter is shown at chapter level (instead of as
+     * individual verses) inside a non-promoted book.
+     */
+    var searchChapterThreshold: Int
+        get() = searchChapterThresholdState.value
+        set(value) {
+            val clamped = value.coerceIn(MIN_SEARCH_THRESHOLD, MAX_SEARCH_THRESHOLD)
+            if (searchChapterThresholdState.value != clamped) {
+                searchChapterThresholdState.value = clamped
+                save()
+            }
+        }
+
+    /**
+     * Persisted global search query. Written when the search closes;
+     * restored the next time it opens (AppSearchState seeds from this).
+     */
+    var globalSearchQuery: String
+        get() = globalSearchQueryState.value
+        set(value) {
+            if (globalSearchQueryState.value != value) {
+                globalSearchQueryState.value = value
+                save()
+            }
+        }
+
+    /** Persisted "Aa" (match case) toggle for the global search. */
+    var globalSearchMatchCase: Boolean
+        get() = globalSearchMatchCaseState.value
+        set(value) {
+            if (globalSearchMatchCaseState.value != value) {
+                globalSearchMatchCaseState.value = value
+                save()
+            }
+        }
+
+    /** Persisted "abc" (whole word) toggle for the global search. */
+    var globalSearchWholeWord: Boolean
+        get() = globalSearchWholeWordState.value
+        set(value) {
+            if (globalSearchWholeWordState.value != value) {
+                globalSearchWholeWordState.value = value
+                save()
+            }
+        }
+
+    /** Persisted recently-used global search queries (most recent first). */
+    var globalSearchRecents: List<String>
+        get() = globalSearchRecentsState.value
+        set(value) {
+            if (globalSearchRecentsState.value != value) {
+                globalSearchRecentsState.value = value
+                save()
+            }
+        }
+
+    /**
+     * Record a global search query as recently used: de-duplicates
+     * case-insensitively (keeping the newest spelling), moves it to the
+     * front and caps the list at [MAX_GLOBAL_SEARCH_RECENTS]. Blank
+     * queries are ignored.
+     */
+    fun addGlobalSearchRecent(query: String) {
+        val q = query.trim()
+        if (q.isEmpty()) return
+        val updated = listOf(q) + globalSearchRecentsState.value
+            .filter { !it.equals(q, ignoreCase = true) }
+        globalSearchRecents = updated.take(MAX_GLOBAL_SEARCH_RECENTS)
+    }
 
     init {
         load()
@@ -436,6 +645,19 @@ object SettingsManager {
         editorFontScaleState.value = settings.editorFontScale
             .coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
         notesInitializedState.value = settings.notesInitialized
+        bibleSearchQueryState.value = settings.bibleSearchQuery
+        bibleSearchMatchCaseState.value = settings.bibleSearchMatchCase
+        bibleSearchWholeWordState.value = settings.bibleSearchWholeWord
+        bibleSearchRecentsState.value = settings.bibleSearchRecents
+        copyWithTranslationNameState.value = settings.copyWithTranslationName
+        searchBookThresholdState.value = settings.searchBookThreshold
+            .coerceIn(MIN_SEARCH_THRESHOLD, MAX_SEARCH_THRESHOLD)
+        searchChapterThresholdState.value = settings.searchChapterThreshold
+            .coerceIn(MIN_SEARCH_THRESHOLD, MAX_SEARCH_THRESHOLD)
+        globalSearchQueryState.value = settings.globalSearchQuery
+        globalSearchMatchCaseState.value = settings.globalSearchMatchCase
+        globalSearchWholeWordState.value = settings.globalSearchWholeWord
+        globalSearchRecentsState.value = settings.globalSearchRecents
     }
 
 
@@ -467,7 +689,18 @@ object SettingsManager {
                         bibleMaxWidth = bibleMaxWidthState.value.value,
                         editorMaxWidth = editorMaxWidthState.value.value,
                         editorFontScale = editorFontScaleState.value,
-                        notesInitialized = notesInitializedState.value
+                        notesInitialized = notesInitializedState.value,
+                        bibleSearchQuery = bibleSearchQueryState.value,
+                        bibleSearchMatchCase = bibleSearchMatchCaseState.value,
+                        bibleSearchWholeWord = bibleSearchWholeWordState.value,
+                        bibleSearchRecents = bibleSearchRecentsState.value,
+                        copyWithTranslationName = copyWithTranslationNameState.value,
+                        searchBookThreshold = searchBookThresholdState.value,
+                        searchChapterThreshold = searchChapterThresholdState.value,
+                        globalSearchQuery = globalSearchQueryState.value,
+                        globalSearchMatchCase = globalSearchMatchCaseState.value,
+                        globalSearchWholeWord = globalSearchWholeWordState.value,
+                        globalSearchRecents = globalSearchRecentsState.value
                     )
                 )
             )

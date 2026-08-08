@@ -161,9 +161,16 @@ object NotesRepository {
 
 
     fun notesForVerse(bookName: String, chapter: Int, verse: Int): List<ParsedNote> {
+        val targetNumber = BibleRepository.bookNumberFor(bookName)
         return notes.filter { note ->
             note.references.any { ref ->
-                ref.book == bookName && ref.chapter == chapter && ref.verse == verse
+                // Case-insensitive AND cross-language: a German `$Lukas`
+                // ref still matches the English "Luke" verse panel (both
+                // resolve to the same canonical book number).
+                val refNumber = BibleRepository.bookNumberFor(ref.book)
+                refNumber != null && refNumber == targetNumber &&
+                    ref.chapter == chapter &&
+                    ref.verse == verse
             }
         }
     }
@@ -176,10 +183,91 @@ object NotesRepository {
     }
 
 
+    /**
+     * One matching line of one note, as produced by [searchNotes].
+     * [lineIndex] is the 0-based line number within the note's content
+     * (used to scroll the editor to the match); [lineText] is the trimmed
+     * raw line for the preview.
+     */
+    data class NoteSearchHit(
+        val note: ParsedNote,
+        val lineIndex: Int,
+        val lineText: String
+    )
+
+    /** Cap on how many global-search hits are returned. */
+    private const val MAX_NOTE_SEARCH_HITS = 100
+
+    /**
+     * Full-text search across every note file (Ctrl+Shift+F in the
+     * editor, and the global Ctrl+F search). Scans each note's raw
+     * content line by line — case-insensitive unless [matchCase], and
+     * whole-word when [wholeWord] (so "day" doesn't match "today") —
+     * returning up to [MAX_NOTE_SEARCH_HITS] matching lines in note
+     * order. Lines that match are reported even inside reference /
+     * quote / list blocks, since the raw content is what the user reads.
+     *
+     * NOTE: reads fresh from disk via [listFiles] (not the cached
+     * [notes] list) so notes created / renamed / deleted during the
+     * session appear in the results immediately — same freshness model
+     * as the sidebar.
+     */
+    fun searchNotes(
+        query: String,
+        matchCase: Boolean = false,
+        wholeWord: Boolean = false
+    ): List<NoteSearchHit> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        val out = ArrayList<NoteSearchHit>(32)
+        for (note in listFiles()) {
+            val lines = note.content.lines()
+            for (index in lines.indices) {
+                if (wholeWord) {
+                    if (!containsWholeWord(lines[index], q, ignoreCase = !matchCase)) continue
+                } else if (!lines[index].contains(q, ignoreCase = !matchCase)) {
+                    continue
+                }
+                out.add(
+                    NoteSearchHit(
+                        note = note,
+                        lineIndex = index,
+                        lineText = lines[index].trim()
+                    )
+                )
+                if (out.size >= MAX_NOTE_SEARCH_HITS) return out
+            }
+        }
+        return out
+    }
+
+    /**
+     * True when [q] occurs in [line] as a whole word — the characters
+     * immediately before and after it are not letters or digits, so "day"
+     * matches in "a day of" but not in "today" or "daylight". Same
+     * boundary semantics as the Bible search's matcher.
+     */
+    private fun containsWholeWord(line: String, q: String, ignoreCase: Boolean): Boolean {
+        var index = line.indexOf(q, ignoreCase = ignoreCase)
+        while (index != -1) {
+            val before = if (index > 0) line[index - 1] else ' '
+            val after = if (index + q.length < line.length) line[index + q.length] else ' '
+            if (!before.isLetterOrDigit() && !after.isLetterOrDigit()) return true
+            index = line.indexOf(q, index + 1, ignoreCase = ignoreCase)
+        }
+        return false
+    }
+
     fun referencesForVerse(bookName: String, chapter: Int, verse: Int): List<NoteReference> {
+        val targetNumber = BibleRepository.bookNumberFor(bookName)
         return notes.flatMap { note ->
             note.references.filter { ref ->
-                ref.book == bookName && ref.chapter == chapter && ref.verse == verse
+                // Case-insensitive AND cross-language: a German `$Lukas`
+                // ref still shows under the English "Luke" verse panel.
+                val refNumber = BibleRepository.bookNumberFor(ref.book)
+                refNumber != null && refNumber == targetNumber &&
+                    ref.chapter == chapter &&
+                    ref.verse == verse
             }.map { ref ->
                 ref.copy(noteTitle = note.title)
             }
@@ -266,12 +354,12 @@ object NotesRepository {
                     blocks.add(HeadingBlock(2, line.removePrefix("## ").trim()))
                 }
 
-                unorderedListRegex.matches(line) -> {
+                unorderedListRegex.containsMatchIn(line) -> {
                     val text = line.replaceFirst(unorderedListRegex, "").trim()
                     blocks.add(ListBlock(ordered = false, text = text))
                 }
 
-                orderedListRegex.matches(line) -> {
+                orderedListRegex.containsMatchIn(line) -> {
                     val text = line.replaceFirst(orderedListRegex, "").trim()
                     blocks.add(ListBlock(ordered = true, text = text))
                 }
@@ -293,6 +381,26 @@ object NotesRepository {
 
                 else -> {
                     blocks.add(ParagraphBlock(line))
+                    // Inline references embedded in a sentence (e.g.
+                    // "Read $Lukas$3$16 today", ending at a space) feed
+                    // the verse-scoped "Referenced notes" panel. The
+                    // editor renders the chips via
+                    // NoteVisualTransformation; here we only extract the
+                    // verse-level tokens (book-only / chapter-only tokens
+                    // have no verse, so no NoteReference is created — the
+                    // model is verse-scoped).
+                    findReferenceTokens(line).forEach { token ->
+                        if (token.chapter != null && token.verse != null) {
+                            references.add(
+                                NoteReference(
+                                    noteTitle = title,
+                                    book = token.book.trim(),
+                                    chapter = token.chapter,
+                                    verse = token.verse
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -418,7 +526,7 @@ object NotesRepository {
     // Three granularities: `$Book`, `$Book$C` and `$Book$C$V` (the
     // latter optionally followed by a free-text label).
     private val referenceRegex =
-        Regex("^\\\$([^\\\$]+)(?:\\\$(\\d+)(?:\\\$(\\d+)(?:\\s+(.*))?)?)?\\s*$")
+        Regex("^\\$([^\\$]+)(?:\\$(\\d+)(?:\\$(\\d+)(?:\\s+(.*))?)?)?\\s*$")
 
     private val quoteRegex =
         Regex("^\"(.+?)\"(?:\\[#([0-9A-Fa-f]{3,8})])?\\s*(.*)$")

@@ -1,0 +1,5 @@
+# Force LF line endings for shell scripts — otherwise Git for Windows
+# checks them out with CRLF and the shebang (`#!/bin/sh\r`) breaks on
+# GitHub's windows-latest runners when CI invokes ./gradlew via bash.
+gradlew text eol=lf
+*.sh text eol=lf

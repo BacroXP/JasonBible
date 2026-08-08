@@ -43,6 +43,18 @@ kotlin {
                 implementation("org.apache.pdfbox:pdfbox:3.0.4")
             }
         }
+
+        // Desktop unit tests — pure logic only (search matching, reading
+        // plan, reference-prefix scan, copy formatting). `kotlin("test")`
+        // brings the JUnit-backed test runner. `kotlinx-coroutines-test`
+        // adds virtual-time `runTest` for the search debounce and other
+        // suspend logic. Run with `./gradlew desktopTest`.
+        val desktopTest by getting {
+            dependencies {
+                implementation(kotlin("test"))
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+            }
+        }
     }
 }
 
@@ -52,6 +64,13 @@ compose.desktop {
     application {
 
         mainClass = "MainKt"
+
+        // Skiko (Compose's rendering layer) loads its native libraries via
+        // java.lang.System::load. On JDK 24+ that is a restricted native
+        // access call, so without this flag the JVM prints a warning (and
+        // will block it in a future release). Harmless on older JDKs.
+        // Applied to both the `run` task and the packaged launchers.
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
 
         nativeDistributions {
 

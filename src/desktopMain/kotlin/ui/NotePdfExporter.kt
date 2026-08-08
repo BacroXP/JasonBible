@@ -3,6 +3,7 @@
 package ui
 
 import model.ParsedNote
+import model.Verse
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
@@ -13,11 +14,6 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.nio.file.Path
 import java.nio.file.Paths
-
-
-/** Right-to-Left / Left-to-Right markers — strip from PDF (no bidi support). */
-private const val RLM = "\u200F"
-private const val LRM = "\u200E"
 
 
 /**
@@ -41,7 +37,51 @@ object NotePdfExporter {
         val defaultName = (note.title.ifBlank { note.fileName.removeSuffix(".note") }) + ".pdf"
         val target = promptForPdfPath(defaultName) ?: return null
         return try {
-            writePdf(target, note, sourceContent)
+            writePdf(
+                target = target,
+                title = note.title.ifBlank { note.fileName.removeSuffix(".note") },
+                subtitle = note.fileName,
+                content = sourceContent
+            )
+            target
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * Export a Bible chapter as a paginated PDF: the `Book C` title (with
+     * the active translation's display name as a caption when non-null),
+     * then each verse as `N. text` on its own line. Reuses the same
+     * save-dialog, pagination and font pipeline as the note export.
+     */
+    fun exportChapterAsPdf(
+        bookName: String,
+        chapterNumber: Int,
+        verses: List<Verse>,
+        translationName: String?
+    ): Path? {
+        val safeBook = bookName.trim()
+            .replace(Regex("[\\\\/:*?\"<>|]"), "-")
+            .ifBlank { "Bible" }
+        val defaultName = "$safeBook $chapterNumber.pdf"
+        val target = promptForPdfPath(defaultName) ?: return null
+        return try {
+            val body = buildString {
+                for (verse in verses) {
+                    // Strip Strong's markup so the exported chapter reads
+                    // as clean prose (same rule as the copy actions).
+                    append("${verse.verse}. ")
+                    append(stripWordStudyMarkup(verse.text).trim())
+                    append('\n')
+                }
+            }
+            writePdf(
+                target = target,
+                title = "${bookName.trim()} $chapterNumber",
+                subtitle = translationName.orEmpty(),
+                content = body
+            )
             target
         } catch (t: Throwable) {
             null
@@ -62,7 +102,12 @@ object NotePdfExporter {
     }.getOrNull()
 
 
-    private fun writePdf(target: Path, note: ParsedNote, content: String) {
+    private fun writePdf(
+        target: Path,
+        title: String,
+        subtitle: String,
+        content: String
+    ) {
         PDDocument().use { doc ->
             val font = PDType1Font(Standard14Fonts.FontName.HELVETICA)
             val fontBold = PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD)
@@ -80,22 +125,22 @@ object NotePdfExporter {
             var y = topY
 
             // ----- Title -----
-            val title = sanitizePdfText(note.title.ifBlank { note.fileName.removeSuffix(".note") })
             stream.beginText()
             stream.setFont(fontBold, titleFontSize)
             stream.newLineAtOffset(margin, y)
-            stream.showText(title)
+            stream.showText(sanitizePdfText(title))
             stream.endText()
             y -= titleFontSize + 10f
 
-            // ----- Source file name (small gray-ish caption) -----
-            val fileNameDisplay = sanitizePdfText(note.fileName)
-            stream.beginText()
-            stream.setFont(font, 9f)
-            stream.newLineAtOffset(margin, y)
-            stream.showText(fileNameDisplay)
-            stream.endText()
-            y -= 18f
+            // ----- Caption (source file name / translation name) -----
+            if (subtitle.isNotBlank()) {
+                stream.beginText()
+                stream.setFont(font, 9f)
+                stream.newLineAtOffset(margin, y)
+                stream.showText(sanitizePdfText(subtitle))
+                stream.endText()
+                y -= 18f
+            }
 
             // ----- Horizontal divider -----
             stream.setStrokingColor(180f / 255f, 180f / 255f, 180f / 255f)

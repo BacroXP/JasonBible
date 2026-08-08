@@ -16,7 +16,10 @@ enum class SoundEvent {
     Click,
     Hover,
     Open,
-    Close
+    Close,
+    // Startup chime, played once when the app finishes booting
+    // (right as the splash screen hands over to the main UI).
+    Boot
 }
 
 
@@ -31,6 +34,8 @@ enum class SoundEvent {
  *   - Hover       — 25 ms, 850 Hz sine with very fast exp decay (80)
  *   - Open        — 180 ms, frequency sweep 400→1100 Hz, trapezoid envelope
  *   - Close       — 160 ms, frequency sweep 1100→400 Hz, trapezoid envelope
+ *   - Boot        — 650 ms, overlapping two-note chime (C5 → G5, a perfect
+ *                   fifth) with soft attacks and exponential decays
  *
  * Sample format is mono 22050 Hz, 16-bit PCM little-endian, packed into a
  * standard RIFF/WAVE container.
@@ -107,6 +112,7 @@ object SoundLibrary {
             SoundEvent.Hover -> 0.025
             SoundEvent.Open -> 0.180
             SoundEvent.Close -> 0.160
+            SoundEvent.Boot -> 0.650
         }
         val n = (duration * SAMPLE_RATE).toInt().coerceAtLeast(2)
         val out = FloatArray(n)
@@ -130,6 +136,18 @@ object SoundLibrary {
                     val env = trapezoidEnvelope(t, duration, 0.005, 0.040)
                     val freq = 1100.0 - (1100.0 - 400.0) * (t / duration)
                     sin(2 * PI * freq * t) * env
+                }
+                SoundEvent.Boot -> {
+                    // Two overlapping notes (C5, then G5 a fifth up) with
+                    // soft ~12 ms attacks and exponential decays. The
+                    // overlap avoids any click at the note change and
+                    // reads as a friendly startup chime rather than a
+                    // single UI tick.
+                    val t2 = t - 0.18
+                    val env1 = if (t >= 0.0) exp(-t * 9.0) * (t / 0.012).coerceIn(0.0, 1.0) else 0.0
+                    val env2 = if (t2 >= 0.0) exp(-t2 * 8.0) * (t2 / 0.012).coerceIn(0.0, 1.0) else 0.0
+                    sin(2 * PI * 523.25 * t) * env1 * 0.55 +
+                        sin(2 * PI * 783.99 * t2) * env2 * 0.55
                 }
             }
             out[i] = (sample * 0.5).toFloat()

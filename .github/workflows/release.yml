@@ -2,19 +2,46 @@ name: Build & Release
 
 on:
   push:
+    branches:
+      - "**"
     tags:
       - "v*"
 
 permissions:
-  contents: write
+  # Read-only by default; only the `release` job (which attaches
+  # installers to the GitHub Release) elevates to write.
+  contents: read
 
 jobs:
+  # Desktop unit tests (pure logic: search matching, note parser, Bible
+  # catalog aliasing, copy formatting) run on EVERY push to any branch.
+  # The installer jobs below additionally depend on this job, so a broken
+  # test also blocks a release build.
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Run desktop unit tests
+        run: ./gradlew desktopTest --no-daemon
+
   # Each installer must be built on its native OS — the Compose Gradle
   # plugin cannot cross-compile MSI / DMG (MSI needs Windows + WiX, DMG
   # needs macOS + hdiutil). Build on three native runners, upload the
   # installers as artifacts, and attach everything in one final job.
+  # The branch pushes above only run the `test` job; the builds below
+  # stay limited to version tags.
 
   build-deb:
+    needs: [test]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +60,8 @@ jobs:
           path: build/compose/binaries/main/deb/*.deb
 
   build-msi:
+    needs: [test]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +82,8 @@ jobs:
           path: build/compose/binaries/main/msi/*.msi
 
   build-dmg:
+    needs: [test]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +103,10 @@ jobs:
 
   release:
     needs: [build-deb, build-msi, build-dmg]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
