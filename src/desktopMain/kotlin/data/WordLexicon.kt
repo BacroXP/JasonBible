@@ -74,7 +74,7 @@ object WordLexicon {
     // Mirror of ui/WordStudy.kt's token regexes (kept here so the data
     // layer can build the index without depending on the UI package; the
     // two parsers must stay in sync with that file's).
-    private val STRONGS_REGEX = Regex("([^\\s{}]+)\\{([GH]\\d+)}(?:\\{(\\([^)]*\\))} )?")
+    private val STRONGS_REGEX = Regex("([^\\s{}]+)\\{([GH]\\d+)}(?:\\{(\\([^)]*\\))})?")
     private val PARSED_REGEX =
         Regex("((?!G\\d)\\S+) (G\\d+)(?: (G\\d+))?(?: (G\\d+))?(?: (G\\d+))? ((?!G\\d)\\S+)")
 
@@ -118,12 +118,12 @@ object WordLexicon {
                 // list instead of aborting the whole build.
                 val greekBooks = try {
                     BibleRepository.loadModule(GREEK_MODULE)
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     emptyList()
                 }
                 val englishBooks = try {
                     BibleRepository.loadModule(ENGLISH_MODULE)
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     emptyList()
                 }
                 val built = withContext(Dispatchers.Default) {

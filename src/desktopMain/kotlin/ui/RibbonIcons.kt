@@ -120,6 +120,12 @@ object RibbonIcons {
     // Vertical ellipsis — the row-actions menu trigger.
     val More: ImageVector by lazy { icon("More", "M12,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM12,10c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2zM12,16c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2z") }
 
+    // ---- Media playback controls --------------------------------------
+    // Circular arrows — loop / repeat the current media.
+    val Loop: ImageVector by lazy {
+        icon("Loop", "M7,7h10v3l4,-4 -4,-4v3H5v6h2V7zM17,17H7v-3l-4,4 4,4v-3h12v-6h-2v4z")
+    }
+
     // ---- Media service glyphs ------------------------------------------
     // Monochrome equivalents of the colorful service emojis, so the media
     // cards / popup / mini player / dialogs share the main menu's

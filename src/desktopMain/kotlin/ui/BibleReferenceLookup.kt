@@ -101,7 +101,7 @@ internal fun findFirstReferenceOffset(
                 token.chapter ?: chapter ?: 0,
                 token.verse!!,
                 token.endChapter ?: token.chapter ?: chapter ?: 0,
-                token.endVerse!!,
+                token.endVerse,
                 chapter, verse
             )
             else -> token.verse == verse
@@ -386,7 +386,7 @@ internal fun findReferenceInLookup(lookup: ReferenceLookup, sourcePos: Int): Ref
 /**
  * Rightmost token whose start is <= [pos]; only returned when [pos] also
  * lies strictly before its end. Works for any token type exposing
- * [sourceStart] / [sourceEnd] (Bible [ReferenceToken] and media
+ * `sourceStart` / `sourceEnd` (Bible [ReferenceToken] and media
  * [MediaReferenceToken]) — the lists are pre-sorted by start.
  */
 private fun <T> findTokenContaining(

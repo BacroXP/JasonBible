@@ -1,6 +1,6 @@
 package data
 
-import runBlocking
+import kotlinx.coroutines.runBlocking
 import testutil.TestEnv
 import java.nio.file.Files
 import java.nio.file.Path
@@ -24,7 +24,7 @@ class MediaReferencesTest {
     }
 
     /** Create a dummy media file in the (temp) notes media folder. */
-    private fun createMediaFile(name: String): Path {
+    private fun createMediaFile(): Path {
         val dir = Path.of(
             System.getProperty("user.home"),
             ".bibleapp",
@@ -32,7 +32,7 @@ class MediaReferencesTest {
             "media"
         )
         Files.createDirectories(dir)
-        val path = dir.resolve(name)
+        val path = dir.resolve("photo-abc123.png")
         Files.write(path, byteArrayOf(0x01, 0x02, 0x03))
         return path
     }
@@ -371,7 +371,7 @@ class MediaReferencesTest {
 
     @Test
     fun fileTokenParsesWhenFileExists() {
-        val media = createMediaFile("photo-abc123.png")
+        val media = createMediaFile()
         val tokens = findMediaReferenceTokens("@file:media/photo-abc123.png")
         assertEquals(1, tokens.size)
         val token = tokens.first()
@@ -385,7 +385,7 @@ class MediaReferencesTest {
 
     @Test
     fun fileChipTextNeverLongerThanTheSourceToken() {
-        createMediaFile("photo-abc123.png")
+        createMediaFile()
         val source = "@file:media/photo-abc123.png"
         val token = findMediaReferenceTokens(source).single()
         val tokenLen = token.sourceEnd - token.sourceStart
@@ -643,7 +643,7 @@ class MediaReferencesTest {
     }
 
     @Test
-    fun fetchProfileInfoServesCachedProfileWithoutNetwork() = runBlocking {
+    fun fetchProfileInfoServesCachedProfileWithoutNetwork(): Unit = runBlocking {
         // Seed the session cache with a deterministic payload for a real
         // profile token's URL — [fetchProfileInfo] must return it without
         // touching the network (a live scrape of the fake URL could never
@@ -710,7 +710,7 @@ class MediaReferencesTest {
     fun fetchMediaTitleUsesFileNameForLocalFilesWithoutNetwork() {
         MediaTitleCache.clearForTests()
         try {
-            createMediaFile("photo-abc123.png")
+            createMediaFile()
             val token = findMediaReferenceTokens("@file:media/photo-abc123.png").single()
             // File name is the label (files carry no metadata title).
             assertEquals(

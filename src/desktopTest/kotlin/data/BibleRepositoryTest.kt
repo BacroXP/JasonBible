@@ -63,7 +63,7 @@ class BibleRepositoryTest {
         SettingsManager.translation = "not_a_real_module_id"
         val id = BibleRepository.currentModuleId()
         assertNotNull(id)
-        assertEquals(BibleCatalog.defaultId, id)
+        assertEquals(expected = BibleCatalog.defaultId, actual = id)
     }
 
     @Test

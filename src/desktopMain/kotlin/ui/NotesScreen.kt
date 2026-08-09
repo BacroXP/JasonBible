@@ -209,7 +209,7 @@ fun NotesScreen(
      * External "land on this line" target (from the global Ctrl+F search):
      * when non-null and the note is open, the editor scrolls to this
      * 0-based line of the note's content. Armed by forwarding it into the
-     * internal [pendingScrollLineOffset] pipeline (the same mechanism the
+     * internal `pendingScrollLineOffset` pipeline (the same mechanism the
      * in-screen notes search uses), then cleared via [onScrollLineConsumed]
      * so the parent's state doesn't linger.
      */
@@ -962,7 +962,7 @@ fun NotesScreen(
     /**
      * Live update of the editor zoom while the footer slider is being
      * dragged — touches only in-memory state for a smooth preview; the
-     * value is persisted to disk on [commitFontScale] (slider release).
+     * value is persisted to disk on `commitFontScale` (slider release).
      */
     fun setFontScale(value: Float) {
         editorFontScale = value.coerceIn(ZOOM_MIN, ZOOM_MAX)
@@ -1875,20 +1875,6 @@ fun NotesScreen(
                             )
                         }
 
-                        // Rich media cards: every `@youtube:…` / `@spotify:…` /
-                        // `@url:…` link in the note renders below the editor
-                        // (and below the transient $Book autocomplete row)
-                        // with its thumbnail (or a "title - channel" fallback)
-                        // and title + channel beneath. Clicking a card opens
-                        // the link in the default browser.
-                        MediaReferencesPanel(
-                            text = editorValue.text,
-                            onOpenUrl = { url ->
-                                SoundManager.play(SoundEvent.Click)
-                                openExternalUrl(url)
-                            }
-                        )
-
                         EditorFooter(
                             value = editorValue,
                             canUndo = undoManager.canUndo(),
@@ -1901,6 +1887,22 @@ fun NotesScreen(
                             onRedo = { redo() },
                             onToggleOrientation = {
                                 applyEditorChange(toggleLineOrientation(editorValue))
+                            }
+                        )
+
+                        // Rich media cards: every `@youtube:…` / `@spotify:…` /
+                        // `@url:…` link in the note renders at the very BOTTOM
+                        // of the notes pane, docked below the footer like the
+                        // notes sidebar is docked at the left edge: collapsed
+                        // to a slim grip strip that pops the whole section out
+                        // upward while the cursor is over it (hover-expand
+                        // lives inside MediaReferencesPanel). Clicking a card
+                        // opens the link in the default browser.
+                        MediaReferencesPanel(
+                            text = editorValue.text,
+                            onOpenUrl = { url ->
+                                SoundManager.play(SoundEvent.Click)
+                                openExternalUrl(url)
                             }
                         )
                     }
@@ -2426,8 +2428,7 @@ private val REFERENCE_PREFIX_TERMINATORS = setOf(
 
 
 /**
- * The media suggestion bar shown below the editor while the caret
- * completes an `@Phrase`: up to [MAX_MEDIA_SUGGESTIONS] matching
+ * The media suggestion bar shown below the editor while the caret     * completes an `@Phrase`: up to `MAX_MEDIA_SUGGESTIONS` matching
  * channels / videos from the debounced web search, each with a muted
  * kind icon, its title and a secondary line (channel name / subscriber
  * count) plus the `@service` tag it will insert. Tab (or a click)

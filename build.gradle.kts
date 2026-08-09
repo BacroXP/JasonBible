@@ -19,7 +19,7 @@ kotlin {
 
     sourceSets {
 
-        val desktopMain by getting {
+        sourceSets.getByName("desktopMain") {
 
             // In-app media player: an embedded JavaFX WebView hosts each
             // service's official embed (YouTube iframe / Vimeo player /
@@ -89,7 +89,7 @@ kotlin {
         // brings the JUnit-backed test runner. `kotlinx-coroutines-test`
         // adds virtual-time `runTest` for the search debounce and other
         // suspend logic. Run with `./gradlew desktopTest`.
-        val desktopTest by getting {
+        sourceSets.getByName("desktopTest") {
             dependencies {
                 implementation(kotlin("test"))
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
@@ -150,7 +150,7 @@ compose.desktop {
             )
 
             packageName = "BibleApp"
-            packageVersion = "1.0.0"
+            packageVersion = "2.0.0"
 
             // Application icons, one per platform. Kept in
             // src/desktopMain/resources/icons/ and referenced explicitly
@@ -180,12 +180,12 @@ val fileSizeHardLimitMb: Int =
 // existing ~30 MB translation files don't warn on every build.
 val fileSizeWarnLimitMb: Int =
     (findProperty("fileSizeWarnLimitMb") as String?)?.toIntOrNull()
-        ?: (fileSizeHardLimitMb * 4) / 5
+        ?: ((fileSizeHardLimitMb * 4) / 5)
 
 fun formatFileSize(bytes: Long): String =
     "%.1f MB".format(bytes / (1024.0 * 1024.0))
 
-val checkFileSizes by tasks.registering {
+val checkFileSizes = tasks.register("checkFileSizes") {
     group = "verification"
     description =
         "Fails the build if any project file exceeds the $fileSizeHardLimitMb MB size limit."

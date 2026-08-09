@@ -13,6 +13,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,6 +24,14 @@ import androidx.compose.ui.unit.dp
 
 
 /**
+ * Non-composable anchor for loading bundled images off the classpath. The
+ * painter helper below cannot reference `SplashScreen::class` directly,
+ * because `SplashScreen` is a @Composable function and bare composable
+ * references are banned outside composable lambdas.
+ */
+private object SplashResources
+
+/**
  * Loads a bundled classpath image (e.g. `icons/Icon.png`) as a Painter —
  * the non-deprecated replacement for the removed
  * `painterResource(resourcePath)` classpath overload.
@@ -30,7 +39,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun rememberClasspathPainter(path: String): Painter {
     val bytes = remember(path) {
-        val stream = checkNotNull(SplashScreen::class.java.getResourceAsStream("/$path")) {
+        val stream = checkNotNull(SplashResources::class.java.getResourceAsStream("/$path")) {
             "Missing bundled resource /$path"
         }
         stream.use { it.readBytes() }

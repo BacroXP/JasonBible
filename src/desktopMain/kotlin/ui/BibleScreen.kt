@@ -42,7 +42,6 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -436,7 +435,7 @@ fun BibleScreen(
             // verseYOffsetsMap, the scroll-to-verse LaunchedEffect would
             // never resolve, and future chapter changes would lose their
             // normal scroll-restore behaviour until the flag was cleared.
-            val targetChapter = matchingBook?.chapters?.find { it.chapter == incoming.chapter }
+            val targetChapter = matchingBook.chapters?.find { it.chapter == incoming.chapter }
             pendingScrollVerse = incoming.verse?.takeIf { v ->
                 targetChapter?.verses?.any { it.verse == v } == true
             }
@@ -1080,9 +1079,6 @@ fun BibleScreen(
                                             // stays tidy in the compact SPLIT pane.
                                             ChapterMoreMenu(
                                                 chapterCopy = chapterCopy,
-                                                bookName = selectedBook.name,
-                                                chapterNumber = chapter.chapter,
-                                                verses = chapter.verses,
                                                 onOpenRangeDialog = { copyRangeOpen = true },
                                                 onOpenGlobalSearch = onOpenGlobalSearch,
                                                 onExportPdf = {
@@ -1562,9 +1558,6 @@ private fun TranslationSwitcher(
 @Composable
 private fun ChapterMoreMenu(
     chapterCopy: String,
-    bookName: String,
-    chapterNumber: Int,
-    verses: List<Verse>,
     onOpenRangeDialog: () -> Unit,
     onExportPdf: () -> Unit,
     onOpenGlobalSearch: () -> Unit = {}
@@ -2052,7 +2045,7 @@ private fun JumpToVerseDialog(
         chapter in 1..book.chapters.size
     val verseValid = chapterValid &&
         (verseText.isBlank() || (verse != null &&
-            verse in 1..book!!.chapters[chapter!! - 1].verses.size))
+            verse in 1..book.chapters[chapter - 1].verses.size))
     val canGo = chapterValid &&
         (verseText.isBlank() || verseValid)
 

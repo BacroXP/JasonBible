@@ -26,8 +26,10 @@ import javafx.scene.layout.StackPane
 import javafx.scene.media.Media
 import javafx.scene.media.MediaPlayer
 import javafx.scene.media.MediaView
+import javafx.scene.paint.Color
 import javafx.scene.web.WebEngine
 import javafx.scene.web.WebView
+import javafx.util.Duration
 import netscape.javascript.JSObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,6 +100,23 @@ object MediaPlayerState {
      */
     @Volatile
     var lastEventAt: Long = 0L
+
+    /**
+     * ARGB color of the app surface behind the embedded player, pushed by
+     * the Compose side from MaterialTheme.colorScheme.surface. The JavaFX
+     * scene uses it as its fill so the load-time media canvas (before the
+     * video / widget has painted) blends into the window instead of
+     * flashing black or white.
+     */
+    var surfaceArgb by mutableStateOf(0xFF1E1E1EL)
+
+    /**
+     * True while the native player should loop the current media forever
+     * (JavaFX cycleCount = INDEFINITE). A user preference toggled from
+     * the player controls — deliberately NOT reset by [reset], so it
+     * survives stopping one clip and playing the next.
+     */
+    var looping by mutableStateOf(false)
 
     fun reset() {
         currentUrl = null
@@ -180,6 +199,12 @@ object MediaPlayerController {
     // Embed (WebView) content — Spotify only.
     private var webView: WebView? = null
     private var webEngine: WebEngine? = null
+
+    /** Design size of the content last mounted ([mount]) — used as the
+     *  fallback for a host panel that attaches before it is laid out, so
+     *  e.g. the Spotify widget keeps its compact aspect instead of
+     *  flashing the video design size. FX-thread confined. */
+    private var fallbackSize: Pair<Double, Double> = 480.0 to 270.0
 
     /**
      * Open the embedded player and start [token] playing. Falls back to
@@ -272,6 +297,29 @@ object MediaPlayerController {
         }
     }
 
+    /** Toggle infinite looping for the native player. Applies to the
+     *  current media immediately and is remembered for the next clip
+     *  ([MediaPlayerState.looping] survives [stop]). Enabling loop on a
+     *  clip that already finished rewinds and restarts it, so the toggle
+     *  always does something visible. */
+    fun setLooping(loop: Boolean) {
+        MediaPlayerState.looping = loop
+        Platform.runLater {
+            val player = nativePlayer ?: return@runLater
+            runCatching {
+                val cycle = if (loop) MediaPlayer.INDEFINITE else 1
+                if (player.cycleCount != cycle) player.cycleCount = cycle
+                // A finished one-shot player sits STOPPED at the end — a
+                // changed cycleCount alone doesn't rewind it, so restart
+                // it to actually begin looping.
+                if (loop && player.status == MediaPlayer.Status.STOPPED) {
+                    player.seek(Duration.ZERO)
+                    player.play()
+                }
+            }
+        }
+    }
+
     /** Stop playback, clear the embedded player and the card state. */
     fun stop() {
         currentToken = null
@@ -310,8 +358,8 @@ object MediaPlayerController {
             // for the Spotify WebView could detach/reload the page.
             if (panel.scene?.root === root) return@runLater
             runCatching {
-                val (w, h) = sceneSize(panel)
-                panel.scene = Scene(root, w, h)
+                val (w, h) = sceneSize(panel, fallbackSize.first, fallbackSize.second)
+                panel.scene = newScene(root, w, h)
             }
         }
     }
@@ -319,6 +367,42 @@ object MediaPlayerController {
     /** The host panel is leaving composition — drop the reference. */
     fun detachHost(panel: JFXPanel) {
         if (hostPanel === panel) hostPanel = null
+    }
+
+    /**
+     * Called by the Compose side when the theme surface color changes:
+     * records it for the next scene and updates the live scene fill so
+     * the transparent media corners keep blending into the card behind.
+     * The Spotify embed page is recolored too (its background is the
+     * surface color — see [spotifyEmbedHtml]); Linux WebView cannot do
+     * page transparency, so the color must be explicit. The WebView's
+     * own backing fill ([WebView.pageFill]) is synced as well — it
+     * defaults to white and is painted behind the page on Linux.
+     */
+    fun updateSurfaceColor(argb: Long) {
+        MediaPlayerState.surfaceArgb = argb
+        Platform.runLater {
+            hostPanel?.scene?.fill = fillColor(argb)
+            // The WebView's backing fill is white by default and is
+            // painted around the page content on Linux — keep it in sync
+            // so the widget's corners blend into the window.
+            webView?.pageFill = fillColor(argb)
+            val engine = webEngine
+            if (engine != null && engine.loadWorker.state == Worker.State.SUCCEEDED) {
+                runCatching { recolorPage(engine, surfaceColorCss(argb)) }
+            }
+        }
+    }
+
+    /** Re-paint the Spotify embed page's canvas with the app surface
+     *  color: the page's html/body background. The WebView paints WHITE
+     *  wherever the page's own background is missing (Linux), so the
+     *  color must always be explicit. FX thread only. */
+    private fun recolorPage(engine: WebEngine, css: String) {
+        engine.executeScript(
+            "document.body.style.background='$css'; " +
+                "document.documentElement.style.background='$css';"
+        )
     }
 
     /**
@@ -366,6 +450,9 @@ object MediaPlayerController {
 
         val player = MediaPlayer(Media(streamUrl))
         nativePlayer = player
+        // Loop forever when the toggle is on: INDEFINITE makes the player
+        // restart the clip automatically at the end of every cycle.
+        player.cycleCount = if (MediaPlayerState.looping) MediaPlayer.INDEFINITE else 1
 
         // True once this player has actually started playing — drives the
         // error fallback below (fall back only when playback NEVER
@@ -384,8 +471,19 @@ object MediaPlayerController {
                     touch()
                 }
 
-                MediaPlayer.Status.PAUSED, MediaPlayer.Status.STOPPED -> {
+                MediaPlayer.Status.PAUSED -> {
                     MediaPlayerState.playing = false
+                    touch()
+                }
+
+                MediaPlayer.Status.STOPPED -> {
+                    // A looped player (cycleCount INDEFINITE) auto-restarts
+                    // the next cycle — if WebKitGTK reports a transitional
+                    // STOPPED at the boundary, don't let it kill the
+                    // playing state (and hide the player panel) mid-loop.
+                    if (!MediaPlayerState.looping) {
+                        MediaPlayerState.playing = false
+                    }
                     touch()
                 }
 
@@ -404,6 +502,12 @@ object MediaPlayerController {
         }
         player.setOnEndOfMedia {
             if (nativePlayer !== player) return@setOnEndOfMedia
+            // Looping: the player auto-restarts the next cycle — keep
+            // claiming playback and don't paint the finished fraction.
+            if (MediaPlayerState.looping) {
+                touch()
+                return@setOnEndOfMedia
+            }
             MediaPlayerState.playing = false
             MediaPlayerState.fraction = 1f
             touch()
@@ -446,7 +550,10 @@ object MediaPlayerController {
             view.fitWidth = 520.0
             view.fitHeight = 340.0
             // MediaView is a leaf Node, not a Parent — it can't be the
-            // scene root directly.
+            // scene root directly. The video fills the surface edge to
+            // edge with SQUARE corners (no rounded clip): a rounded clip
+            // would cut into the video's corners and reveal the pane's
+            // background — the "canvas" — around them.
             StackPane(view).apply {
                 alignment = Pos.CENTER
                 style = "-fx-background-color: #000;"
@@ -475,6 +582,24 @@ object MediaPlayerController {
         webView = web
         val engine = web.engine
         webEngine = engine
+        // Linux WebView CANNOT render a transparent page: where the embed's
+        // page / iframe has transparent margins, WebKit paints an opaque
+        // WHITE background instead of letting the scene fill show through.
+        // So the page gets an explicit background in the app's surface
+        // color.
+        //
+        // The critical piece is the WebView's BACKING FILL: `pageFill`
+        // (JavaFX 18+; the `-fx-page-fill` / `setPageFill` API) defaults
+        // to WHITE, and on Linux WebKitGTK paints it behind the page
+        // content wherever the page's own background does not cover the
+        // viewport — e.g. the frames while the document parses. Node-level
+        // `-fx-background-color` does NOT change this fill on Linux; only
+        // `pageFill` does. Filling it with the app's surface color makes
+        // the canvas behind the widget match the window, so no white can
+        // ever bleed through. (The widget itself fills the canvas edge to
+        // edge — no rounding — so the fill only shows while loading.)
+        web.pageFill = fillColor(MediaPlayerState.surfaceArgb)
+        web.setStyle("-fx-background-color: ${surfaceColorCss(MediaPlayerState.surfaceArgb)};")
 
         // Expose the Java bridge to the page — but ONLY once the page has
         // finished loading. Calling executeScript on the initial
@@ -491,35 +616,81 @@ object MediaPlayerController {
             if (state == Worker.State.SUCCEEDED) {
                 runCatching {
                     (engine.executeScript("window") as JSObject).setMember("JavaBridge", bridge)
+                    // Re-apply the CURRENT surface color now that the
+                    // document exists. The page may have been built with
+                    // the default color when the Compose side pushed the
+                    // theme surface AFTER this WebView was created (the
+                    // two run on different threads) — re-painting here
+                    // guarantees the rounded corners match the window
+                    // regardless of the ordering.
+                    recolorPage(engine, surfaceColorCss(MediaPlayerState.surfaceArgb))
                 }
             }
         }
 
-        mount(web)
-        engine.loadContent(spotifyEmbedHtml(embedUrl), "text/html")
+        // 400x80 fallback size: the widget keeps its compact aspect even
+        // if the host panel isn't composed yet (the video design size
+        // would stretch it until JFXPanel resizes). The widget fills the
+        // whole canvas edge to edge with SQUARE corners — any rounding
+        // here would cut into the widget's corners and reveal the
+        // surface-colored canvas behind them.
+        mount(
+            StackPane(web).apply {
+                style = "-fx-background-color: ${surfaceColorCss(MediaPlayerState.surfaceArgb)};"
+            },
+            fallbackWidth = 400.0,
+            fallbackHeight = 80.0
+        )
+        engine.loadContent(
+            spotifyEmbedHtml(embedUrl, surfaceColorCss(MediaPlayerState.surfaceArgb)),
+            "text/html"
+        )
     }
 
     /** Set [root] as the host panel's scene content. No-op without a host
      *  — attachHost pushes it once the panel composes. FX thread only. */
-    private fun mount(root: Parent) {
+    private fun mount(
+        root: Parent,
+        fallbackWidth: Double = 480.0,
+        fallbackHeight: Double = 270.0
+    ) {
         currentRoot = root
+        fallbackSize = fallbackWidth to fallbackHeight
         val panel = hostPanel ?: return
         runCatching {
-            val (w, h) = sceneSize(panel)
-            panel.scene = Scene(root, w, h)
+            val (w, h) = sceneSize(panel, fallbackWidth, fallbackHeight)
+            panel.scene = newScene(root, w, h)
         }
     }
+
+    /** A scene for the host panel, filled with the app's surface color so
+     *  transparent media corners blend into the rounded card. FX thread
+     *  only. */
+    private fun newScene(root: Parent, w: Double, h: Double): Scene =
+        Scene(root, w, h, fillColor(MediaPlayerState.surfaceArgb))
+
+    /** Surface color as a JavaFX paint (black on any parse failure). */
+    private fun fillColor(argb: Long): Color = runCatching {
+        Color.web(String.format("#%08X", argb))
+    }.getOrDefault(Color.BLACK)
+
+    /** Surface color as an opaque CSS hex (`#rrggbb`) for the embed page. */
+    private fun surfaceColorCss(argb: Long): String =
+        String.format("#%06X", argb and 0xFFFFFF)
 
     /** Scene size for the host panel. Falls back to the design size before
      *  the panel has been laid out (width/height are 0 at creation) — a
      *  0×0 scene would clip the media; JFXPanel resizes the scene to the
      *  panel once it is laid out. FX thread only. */
-    private fun sceneSize(panel: JFXPanel): Pair<Double, Double> =
+    private fun sceneSize(
+        panel: JFXPanel,
+        fallbackWidth: Double = 480.0,
+        fallbackHeight: Double = 270.0
+    ): Pair<Double, Double> =
         if (panel.width > 0 && panel.height > 0) {
             panel.width.toDouble() to panel.height.toDouble()
         } else {
-            // Matches the EmbeddedPlayer panel's requested dp size.
-            480.0 to 270.0
+            fallbackWidth to fallbackHeight
         }
 
     private fun fallbackToBrowser(token: MediaReferenceToken) {
@@ -539,14 +710,25 @@ object MediaPlayerController {
  * postMessage event protocol and no public command API, so the page is a
  * plain iframe — playback state for Spotify stays an indeterminate state
  * in the UI, and pause/resume happen in the embed's own controls.
+ *
+ * [backgroundColor] is the app's surface color. It is REQUIRED (not
+ * transparent) because Linux WebView cannot render page transparency —
+ * transparent page areas are painted opaque white. Giving the page the
+ * app's surface color makes the load-time canvas blend into the window
+ * instead of flashing white.
+ *
+ * The iframe fills the page edge to edge with SQUARE corners. There is
+ * deliberately NO border-radius: rounding the canvas would cut into the
+ * widget's corners and reveal the page background — the visible "canvas"
+ * patch — behind them.
  */
-private fun spotifyEmbedHtml(embedUrl: String): String = """
+private fun spotifyEmbedHtml(embedUrl: String, backgroundColor: String): String = """
     <!DOCTYPE html>
     <html>
     <head>
     <meta charset="utf-8">
     <style>
-      html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+      html, body { margin: 0; padding: 0; height: 100%; background: $backgroundColor; overflow: hidden; }
       iframe { width: 100%; height: 100%; border: 0; display: block; }
     </style>
     </head>

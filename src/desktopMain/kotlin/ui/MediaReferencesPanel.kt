@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -128,12 +129,14 @@ internal const val WATCHDOG_GRACE_MILLIS = 8000L
  * per-card loading / fallback states. Hidden entirely when the note
  * contains no media references.
  *
- * Hover-expand ("swoop up"): when the note HAS media, the section
- * collapses to a thin grip strip at the bottom of the editor and
- * expands upward while the cursor is over it — the same hover pattern
- * as the notes sidebar (with the matching Open/Close sound blip). It
- * stays expanded while something is playing so the card's live
- * progress and controls don't vanish when the cursor leaves.
+ * Docked at the bottom of the notes pane (below the editor footer) and
+ * hover-expand ("swoop up"): when the note HAS media, the section
+ * collapses to a slim grip strip at the very bottom edge and expands
+ * upward while the cursor is over it — the same hover pattern as the
+ * notes sidebar, just rotated to the bottom edge (with the matching
+ * Open/Close sound blip). It stays expanded while something is playing
+ * so the card's live progress and controls don't vanish when the
+ * cursor leaves.
  */
 @Composable
 internal fun MediaReferencesPanel(
@@ -236,6 +239,14 @@ internal fun MediaReferencesPanel(
     // and pause/stop controls must not vanish the moment the cursor
     // leaves the panel.
     val showMedia = isMediaHovered || MediaPlayerState.currentUrl != null
+    // Grip-handle alpha: dim while the drawer is open so the pill reads
+    // as a handle under the cards instead of a bright bar (animated so
+    // the dimming matches the cards' expand/shrink motion).
+    val gripAlpha by animateFloatAsState(
+        targetValue = if (showMedia) 0.45f else 0.8f,
+        animationSpec = tween(durationMillis = 180),
+        label = "grip-alpha"
+    )
 
     Box(
         modifier = Modifier
@@ -243,102 +254,110 @@ internal fun MediaReferencesPanel(
             .hoverable(mediaHoverSource)
             .soundHoverOn(mediaHoverSource)
     ) {
-        if (!showMedia) {
-            // Collapsed grip strip: the small "area" the cursor enters to
-            // swoop the media section up. A subtle rounded pill mirrors
-            // the notes sidebar's trigger line.
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(16.dp)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            AnimatedVisibility(
+                visible = showMedia,
+                enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
             ) {
-                Box(
-                    modifier = Modifier
-                        .width(36.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-                )
-            }
-        }
+                // One Open/Close blip per genuine visibility transition
+                // (debounced inside PlayOpenCloseSound, so rapid hover
+                // wavering does not cause repeated sonic bursts).
+                PlayOpenCloseSound(visible = showMedia)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Media References",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    // Cards in a 2-column grid (fits the editor pane in both
+                    // standalone and split layouts); a lone trailing card gets
+                    // a spacer to keep the rhythm. Bounded height with
+                    // internal scroll so a long list can't crush the editor
+                    // above it.
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        tokens.chunked(2).forEach { rowTokens ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                rowTokens.forEach { token ->
+                                    val url = token.resolveUrl().orEmpty()
+                                    when {
+                                        token.service == MediaService.FILE ->
+                                            // Embedded local files get a media-only
+                                            // card (image shown, video/audio
+                                            // playable) with no title / artist
+                                            // metadata.
+                                            FileCard(
+                                                token = token,
+                                                modifier = Modifier.weight(1f)
+                                            )
 
-        AnimatedVisibility(
-            visible = showMedia,
-            enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
-            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
-        ) {
-            // One Open/Close blip per genuine visibility transition
-            // (debounced inside PlayOpenCloseSound, so rapid hover
-            // wavering does not cause repeated sonic bursts).
-            PlayOpenCloseSound(visible = showMedia)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Media References",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                // Cards in a 2-column grid (fits the editor pane in both
-                // standalone and split layouts); a lone trailing card gets
-                // a spacer to keep the rhythm. Bounded height with
-                // internal scroll so a long list can't crush the editor
-                // above it.
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 340.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    tokens.chunked(2).forEach { rowTokens ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            rowTokens.forEach { token ->
-                                val url = token.resolveUrl().orEmpty()
-                                when {
-                                    token.service == MediaService.FILE ->
-                                        // Embedded local files get a media-only
-                                        // card (image shown, video/audio
-                                        // playable) with no title / artist
-                                        // metadata.
-                                        FileCard(
-                                            token = token,
-                                            modifier = Modifier.weight(1f)
-                                        )
+                                        token.isProfile ->
+                                            // YouTube channel / Spotify user or
+                                            // artist: avatar + name beside it,
+                                            // click opens the profile page in the
+                                            // browser.
+                                            ProfileCard(
+                                                token = token,
+                                                info = profiles[url],
+                                                avatar = avatars[url],
+                                                loading = profileLoading[url] ?: false,
+                                                onClick = { if (url.isNotBlank()) onOpenUrl(url) },
+                                                modifier = Modifier.weight(1f)
+                                            )
 
-                                    token.isProfile ->
-                                        // YouTube channel / Spotify user or
-                                        // artist: avatar + name beside it,
-                                        // click opens the profile page in the
-                                        // browser.
-                                        ProfileCard(
+                                        else -> MediaCard(
                                             token = token,
-                                            info = profiles[url],
-                                            avatar = avatars[url],
-                                            loading = profileLoading[url] ?: false,
+                                            info = previews[url],
+                                            thumbnail = thumbnails[url],
+                                            duration = durations[url],
+                                            loading = loading[url] ?: false,
                                             onClick = { if (url.isNotBlank()) onOpenUrl(url) },
                                             modifier = Modifier.weight(1f)
                                         )
-
-                                    else -> MediaCard(
-                                        token = token,
-                                        info = previews[url],
-                                        thumbnail = thumbnails[url],
-                                        duration = durations[url],
-                                        loading = loading[url] ?: false,
-                                        onClick = { if (url.isNotBlank()) onOpenUrl(url) },
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                    }
                                 }
-                            }
-                            if (rowTokens.size == 1) {
-                                Spacer(modifier = Modifier.weight(1f))
+                                if (rowTokens.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
                             }
                         }
                     }
                 }
+            }
+
+            // Grip strip — ALWAYS in the composition at the bottom edge,
+            // like the notes sidebar's always-visible trigger line.
+            // Collapsed it is the hover target the cursor enters to swoop
+            // the section up; expanded it reads as the drawer's handle.
+            // Keeping it composed (instead of toggling it with the panel)
+            // means the cards expand straight up off it and shrink straight
+            // down onto it — there is never a fresh grip popping in while
+            // the cards are still animating out, which previously looked
+            // like the media data duplicating itself at the bottom.
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(20.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(44.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = gripAlpha)
+                        )
+                )
             }
         }
     }
@@ -506,6 +525,22 @@ private fun MediaCard(
                                 onStop = { MediaPlayerController.stop() },
                                 modifier = Modifier.align(Alignment.TopEnd)
                             )
+                            // Loop toggle — native playback only (the
+                            // Spotify WebView embed has no loop control,
+                            // so toggling it there would do nothing).
+                            if (token.service != MediaService.SPOTIFY) {
+                                LoopButton(
+                                    active = MediaPlayerState.looping,
+                                    onToggle = {
+                                        MediaPlayerController.setLooping(
+                                            !MediaPlayerState.looping
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .size(22.dp)
+                                )
+                            }
                         } else if (playable && hovered) {
                             PlayPauseButton(
                                 playing = false,
@@ -811,7 +846,7 @@ private fun ProfileCard(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
-                        info?.badge?.let { badge ->
+                        info.badge?.let { badge ->
                             VerifiedBadge(
                                 text = badge,
                                 modifier = Modifier.padding(start = 6.dp)
@@ -1241,6 +1276,38 @@ internal fun PlayPauseButton(
                 drawPath(path, Color.White)
             }
         }
+    }
+}
+
+
+/** Round toggle button with a ⟳ loop glyph — switches the native player
+ *  between one-shot and infinite looping ([MediaPlayerController.setLooping]).
+ *  Accent-highlighted while [active]. Shared by the embedded player and
+ *  the playing media cards. */
+@Composable
+internal fun LoopButton(
+    active: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .clip(CircleShape)
+            .background(
+                if (active) MediaAccent.copy(alpha = 0.9f)
+                else Color.Black.copy(alpha = 0.62f)
+            )
+            .clickable(onClick = onToggle)
+    ) {
+        Icon(
+            imageVector = RibbonIcons.Loop,
+            contentDescription = if (active) "Loop on" else "Loop off",
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(5.dp),
+            tint = Color.White
+        )
     }
 }
 

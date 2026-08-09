@@ -5,7 +5,6 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import model.Book
-import model.Chapter
 
 
 object BibleRepository {

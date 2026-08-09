@@ -95,7 +95,7 @@ internal const val MAX_LONE_CHAPTERS = 40
 internal const val MAX_LONE_VERSES = 40
 
 /**
- * True when [event] is the global-search shortcut: Ctrl+F on a KeyDown.
+ * True when this key event is the global-search shortcut: Ctrl+F on a KeyDown.
  * Shared by every dialog / focusable popup (separate windows the
  * Navigation root handler can't reach) so the key binding can't drift.
  */

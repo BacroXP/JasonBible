@@ -101,11 +101,11 @@ internal fun EditorSurface(
     onLayoutResult: (TextLayoutResult) -> Unit = {},
     dropTarget: DragAndDropTarget,
     /**
-     * Called when a reference chip is tapped. [hit] is null for taps on
-     * plain text; for media references [anchor] is the tap point in
+     * Called when a reference chip is tapped. `hit` is null for taps on
+     * plain text; for media references `anchor` is the tap point in
      * WINDOW px so the caller can anchor the in-app preview popup at the
      * chip (Bible taps pass Offset.Zero — the caller navigates instead).
-     * [shiftPressed] is true when the Shift key was held during the tap
+     * `shiftPressed` is true when the Shift key was held during the tap
      * (an extended range chip then shows its verse picker instead of
      * jumping straight to the start verse).
      */

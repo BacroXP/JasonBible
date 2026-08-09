@@ -13,7 +13,7 @@
 [![Stars](https://img.shields.io/github/stars/BacroXP/JasonBible)](https://github.com/BacroXP/JasonBible)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**[⬇️ Download](#download)** · **[✨ Features](#features)** · **[⌨️ Shortcuts](#keyboard-shortcuts)** · **[🚀 Build & Run](#build--run)** · **[📸 Screenshots](#screenshots)** · **[🔗 Links](#links)**
+**[⬇️ Download](#download)** · **[✨ Features](#features)** · **[🗺 Version history](#-version-history)** · **[⌨️ Shortcuts](#keyboard-shortcuts)** · **[🚀 Build & Run](#build--run)** · **[📸 Screenshots](#screenshots)** · **[🔗 Links](#links)**
 
 </div>
 
@@ -65,6 +65,34 @@ Upgrade to new versions with `sudo apt upgrade bibleapp`.
 | **365-day reading plan** with progress, plus a daily verse on Home | Auto-save to disk · undo/redo · find & replace |
 | Verse highlighting (5 colors), tags, read-tracking & favorites | Notes are plain `.note` files in `~/.bibleapp/notes` |
 | **Split view** — read and take notes side by side | Dark / light theme, zoom (75–200 %), sound effects, DE / EN UI |
+
+## 🗺 Version history
+
+| Version | Focus | Status |
+|---------|-------|--------|
+| **v1.0.0** | General — Bible reading & notes | ✅ Released |
+| **v2.0.0** | Media — in-app playback & rich media cards | 🚧 In development |
+| **v3.0.0** | Accounts — sync & cloud | 🗓 Planned |
+
+**v1.0.0 — the general app** *(released)*
+The core reader & note-taking experience: 90+ offline translations in 52
+languages, word study with Strong's numbers, interlinear / word-aligned
+views, full-text Bible search, the Word-style ribbon notes editor with rich
+formatting, 365-day reading plan, PDF export, split view, highlighting,
+themes and the full shortcut set.
+
+**v2.0.0 — media** *(in development)*
+Media becomes a first-class citizen of your notes. `@youtube:…`,
+`@spotify:…`, `@vimeo:…`, `@soundcloud:…`, `@url:…` and `@file:…` tokens
+render as rich chips & cards with live titles, thumbnails and progress.
+An **in-app media player** plays YouTube, Vimeo, SoundCloud & local files
+(streams resolved by the bundled yt-dlp) and embeds Spotify — with pause,
+stop and a **loop-forever** toggle. `@Phrase` autocomplete searches YouTube
+live, and a hover-out media panel docks under the editor for quick access.
+
+**v3.0.0 — accounts** *(planned)*
+User accounts with cloud sync for notes, settings and reading progress — so
+your library follows you across devices.
 
 ## ⌨️ Keyboard shortcuts
 

@@ -83,7 +83,7 @@ internal data class StrongsToken(
 
 // `word{G1063}` with an optional `{(G5656)}` follow-up. The word may carry
 // apostrophes/hyphens; punctuation (`,`, `.`) always sits OUTSIDE the braces.
-private val STRONGS_TOKEN = Regex("([^\\s{}]+)\\{([GH]\\d+)}(?:\\{(\\([^)]*\\))} )?")
+private val STRONGS_TOKEN = Regex("([^\\s{}]+)\\{([GH]\\d+)}(?:\\{(\\([^)]*\\))})?")
 
 internal fun parseStrongsTokens(text: String): List<StrongsToken> {
     val tokens = ArrayList<StrongsToken>()

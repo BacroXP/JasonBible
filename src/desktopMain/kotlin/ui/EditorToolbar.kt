@@ -589,7 +589,7 @@ internal fun ToolbarTip(
     // the label, e.g. "Bold" + "Ctrl+B".
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
-            preferredPlacement = TooltipAnchorPosition.Above
+            positioning = TooltipAnchorPosition.Above
         ),
         state = rememberTooltipState(),
         tooltip = {
