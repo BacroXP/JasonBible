@@ -21,6 +21,7 @@ import data.SoundManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 import model.Book
 
 
@@ -255,7 +256,7 @@ internal fun rememberBibleSearchState(
     // delay lets it attach to the composition before requesting focus.
     LaunchedEffect(state.open) {
         if (state.open) {
-            delay(50)
+            delay(50.milliseconds)
             state.focusRequester.requestFocus()
         }
     }

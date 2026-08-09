@@ -548,7 +548,6 @@ internal class NoteVisualTransformation(
                                             delta = suffixSrcLen - suffixDstLen
                                         )
                                     )
-                                    src += suffixSrcLen
                                     dst += suffixDstLen
                                 }
                             }
@@ -819,7 +818,6 @@ internal class NoteVisualTransformation(
                                     delta = range.length - suffixDstLen
                                 )
                             )
-                            src += range.length
                             dst += suffixDstLen
                         } else if (range.isNotEmpty()) {
                             ranges.add(
@@ -831,7 +829,6 @@ internal class NoteVisualTransformation(
                                     delta = 0
                                 )
                             )
-                            src += range.length
                             dst += range.length
                         }
                     }
@@ -1023,7 +1020,6 @@ internal class NoteVisualTransformation(
                                                 delta = suffixSrcLen - suffixDstLen
                                             )
                                         )
-                                        src += suffixSrcLen
                                         dst += suffixDstLen
                                     }
                                 }

@@ -58,6 +58,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 import model.Book
 
 
@@ -531,7 +532,7 @@ internal class AppSearchState {
             return
         }
         searching = true
-        delay(200)
+        delay(200.milliseconds)
         val live = query.trim()
         if (live.isEmpty()) {
             results = GlobalSearchResults(emptyList(), emptyList(), emptyList(), emptyList())
@@ -593,7 +594,7 @@ internal fun rememberAppSearchState(): AppSearchState {
 
     LaunchedEffect(state.open) {
         if (state.open) {
-            delay(50)
+            delay(50.milliseconds)
             state.focusRequester.requestFocus()
         }
     }
@@ -1100,7 +1101,7 @@ private fun ExactReferenceCard(
     val isHovered by hover.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -1156,7 +1157,7 @@ private fun BookResultRow(
     val isHovered by hover.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -1257,7 +1258,7 @@ private fun LoneChapterRow(
     val isHovered by hover.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -1312,7 +1313,7 @@ private fun LoneVerseRow(
     val isHovered by hover.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -1361,7 +1362,7 @@ private fun NoteHitRow(
     val isHovered by hover.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }

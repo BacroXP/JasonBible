@@ -38,8 +38,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -60,8 +60,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import data.BibleCatalog
@@ -73,7 +72,9 @@ import data.StrongsRepository
 import model.Book
 import model.Verse
 import ui.components.MaxWidthScaffold
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 
 
@@ -338,7 +339,7 @@ fun BibleScreen(
      * with what's on screen.
      */
     fun applyHistoryPoint(point: NavPoint): Boolean {
-        val book = books.find { it.book == point.bookNumber } ?: return false
+        if (books.none { it.book == point.bookNumber }) return false
         continuousMode = false
         testament = if (point.bookNumber <= 39) {
             Testament.OLD
@@ -501,7 +502,7 @@ fun BibleScreen(
         if (target != null) {
             val offset = verseYOffsetsMap[target]
             if (offset != null) {
-                kotlinx.coroutines.delay(50)
+                delay(50.milliseconds)
                 verseScrollState.animateScrollTo(offset)
                 pendingScrollVerse = null
             }
@@ -719,7 +720,7 @@ fun BibleScreen(
                     // kept out of the reading view so the bible text gets the screen.
                     when {
                     selectedBook == null -> {
-                        TabRow(selectedTabIndex = testament.ordinal) {
+                        PrimaryTabRow(selectedTabIndex = testament.ordinal) {
                             Tab(
                                 selected = testament == Testament.OLD,
                                 onClick = {
@@ -1568,7 +1569,8 @@ private fun ChapterMoreMenu(
     onExportPdf: () -> Unit,
     onOpenGlobalSearch: () -> Unit = {}
 ) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipboardScope = rememberCoroutineScope()
     var expanded by remember { mutableStateOf(false) }
     Box {
         Surface(
@@ -1614,7 +1616,9 @@ private fun ChapterMoreMenu(
                     onClick = {
                         expanded = false
                         SoundManager.play(SoundEvent.Click)
-                        clipboard.setText(AnnotatedString(chapterCopy))
+                        clipboardScope.launch {
+                            clipboard.setClipEntry(plainTextClipEntry(chapterCopy))
+                        }
                     }
                 )
                 DropdownMenuItem(
@@ -1882,7 +1886,8 @@ private fun CopyRangeDialog(
     onDismiss: () -> Unit,
     onOpenGlobalSearch: () -> Unit = {}
 ) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipboardScope = rememberCoroutineScope()
     var fromText by remember { mutableStateOf("1") }
     var toText by remember { mutableStateOf(verses.size.toString()) }
     val from = fromText.toIntOrNull()
@@ -1937,17 +1942,19 @@ private fun CopyRangeDialog(
                 modifier = Modifier.onPreviewKeyEvent(dialogKeyHandler),
                 onClick = {
                     SoundManager.play(SoundEvent.Click)
-                    clipboard.setText(
-                        AnnotatedString(
-                            rangeCopyText(
-                                bookName = bookName,
-                                chapter = chapterNumber,
-                                from = from!!,
-                                to = to!!,
-                                verses = verses
+                    clipboardScope.launch {
+                        clipboard.setClipEntry(
+                            plainTextClipEntry(
+                                rangeCopyText(
+                                    bookName = bookName,
+                                    chapter = chapterNumber,
+                                    from = from!!,
+                                    to = to!!,
+                                    verses = verses
+                                )
                             )
                         )
-                    )
+                    }
                     onDismiss()
                 }
             ) { Text("Copy") }

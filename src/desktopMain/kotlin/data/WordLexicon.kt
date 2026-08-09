@@ -28,16 +28,14 @@ import model.Book
 //     source label, so the UI can distinguish original-language from
 //     translated occurrences.
 //
-// Aramaic support is prepared (LanguageKind.ARAMAIC) but no Aramaic data
-// is bundled, so nothing is invented.
+// Only Hebrew and Greek data is bundled; nothing else is invented.
 // ---------------------------------------------------------------------------
 
 object WordLexicon {
 
-    /** Language of an original-language word. Aramaic is reserved for a
-     *  future aram-tagged module; today's data tags OT Aramaic sections
-     *  with H-numbers, which resolve to [HEBREW]. */
-    enum class LanguageKind(val label: String) { HEBREW("Hebrew"), GREEK("Greek"), ARAMAIC("Aramaic") }
+    /** Language of an original-language word. OT Aramaic sections are
+     *  tagged with H-numbers, which resolve to [HEBREW]. */
+    enum class LanguageKind(val label: String) { HEBREW("Hebrew"), GREEK("Greek") }
 
     /** One passage where a Strong's number occurs. [parsing] is the
      *  morphological code (e.g. `V-AAI-3S`) from the Greek original
@@ -70,13 +68,13 @@ object WordLexicon {
     // non-alphanumeric. Function words are rarely Strong's-tagged, so the
     // FULL text (not just tagged tokens) is what backs the cross-
     // testament quotation matcher.
-    private val MARKUP_REGEX = Regex("\\{[^}]*\\}")
+    private val MARKUP_REGEX = Regex("\\{[^}]*}")
     private val NON_WORD_REGEX = Regex("[^\\p{L}\\p{Nd}]+")
 
     // Mirror of ui/WordStudy.kt's token regexes (kept here so the data
     // layer can build the index without depending on the UI package; the
     // two parsers must stay in sync with that file's).
-    private val STRONGS_REGEX = Regex("([^\\s{}]+)\\{([GH]\\d+)\\}(?:\\{(\\([^)]*\\))\\})?")
+    private val STRONGS_REGEX = Regex("([^\\s{}]+)\\{([GH]\\d+)}(?:\\{(\\([^)]*\\))} )?")
     private val PARSED_REGEX =
         Regex("((?!G\\d)\\S+) (G\\d+)(?: (G\\d+))?(?: (G\\d+))?(?: (G\\d+))? ((?!G\\d)\\S+)")
 
@@ -100,8 +98,6 @@ object WordLexicon {
 
     private val loadingScope = CoroutineScope(Dispatchers.Default)
     private var inFlight: Deferred<Unit>? = null
-
-    val isLoaded: Boolean get() = loaded != null
 
     /** Language of a Strong's number (`H####` Hebrew, `G####` Greek). */
     fun languageOf(number: String): LanguageKind =

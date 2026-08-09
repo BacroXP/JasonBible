@@ -52,7 +52,7 @@ import data.readCapped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
-import java.net.URL
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.LinkedHashMap
@@ -328,7 +328,7 @@ internal suspend fun fetchImageBitmap(url: String): ImageBitmap? {
         return synchronized(imageCache) { imageCache[url] }
     }
     val fetched = withContext(Dispatchers.IO) {
-        val conn = runCatching { URL(url).openConnection() }.getOrNull()
+        val conn = runCatching { URI(url).toURL().openConnection() }.getOrNull()
             ?: return@withContext null
         conn.connectTimeout = 4000
         conn.readTimeout = 4000

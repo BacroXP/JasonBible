@@ -300,31 +300,6 @@ internal fun toggleLineOrientation(current: TextFieldValue): TextFieldValue {
     return current.copy(text = newText, selection = TextRange(newCursor, newCursor))
 }
 
-/**
- * Forces a specific text direction on the cursor's line by stripping any
- * existing RLM / LRM marker and prepending RLM iff [wantRtl] is true.
- * Unlike [toggleLineOrientation] (which cycles LTR ↔ RTL), this always
- * sets the direction to exactly what the caller asked for — keyed
- * shortcuts Ctrl+L (force-LTR) / Ctrl+R (force-RTL) reuse this so a
- * re-press lands on the same state. A leading alignment marker is kept.
- */
-internal fun forceLineOrientation(current: TextFieldValue, wantRtl: Boolean): TextFieldValue {
-    val start = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
-    val lineStart = current.text.lastIndexOf('\n', start - 1).let { if (it < 0) 0 else it + 1 }
-    val lineEnd = current.text.indexOf('\n', lineStart).let { if (it < 0) current.text.length else it }
-    val line = current.text.substring(lineStart, lineEnd)
-    val alignment = alignmentMarkerOf(line)
-    val stripped = stripLeadingMarkers(line)
-    val newLine = alignment + (if (wantRtl) RLM + stripped else stripped)
-    val newText = buildString {
-        append(current.text.substring(0, lineStart))
-        append(newLine)
-        append(current.text.substring(lineEnd))
-    }
-    val cursorDelta = newLine.length - line.length
-    val newCursor = (start + cursorDelta).coerceIn(lineStart, newText.length)
-    return current.copy(text = newText, selection = TextRange(newCursor, newCursor))
-}
 
 // ---------------------------------------------------------------------------
 // Paragraph alignment (left / center / right)
@@ -456,7 +431,7 @@ private fun stripMarkdownFormatting(text: String): String {
         // drops them (Word's eraser clears alignment too).
         var l = line.removePrefix(ALIGN_CENTER).removePrefix(ALIGN_RIGHT)
         // `"quote"[#hex]` → `quote` (colour AND quote markers removed).
-        l = l.replace(Regex("^\"(.*?)\"\\[(?:#[0-9A-Fa-f]{3,8})](.*)$")) { m ->
+        l = l.replace(Regex("^\"(.*?)\"\\[#[0-9A-Fa-f]{3,8}](.*)$")) { m ->
             (m.groupValues[1].trim() + " " + m.groupValues[2].trim()).trim()
         }
         // Line prefixes: H1/H2, quotes, bullets, numbered lists.

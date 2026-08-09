@@ -10,9 +10,12 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.HttpURLConnection
-import java.net.URL
+import java.net.URI
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+
+
+private val YT_SEARCH_JSON = Json { ignoreUnknownKeys = true }
 
 
 // ---------------------------------------------------------------------------
@@ -84,7 +87,7 @@ internal fun extractYTInitialData(body: String): String? {
                 var depth = 0
                 var inString = false
                 var escaped = false
-                for (i in open until body.length) {
+                for (i in open ..< body.length) {
                     val c = body[i]
                     if (inString) {
                         if (escaped) escaped = false
@@ -149,7 +152,7 @@ private fun parseSearchChannel(channel: JsonObject): MediaSearchResult? {
         service = MediaService.YOUTUBE,
         kind = MediaSearchKind.CHANNEL,
         title = decodeHtmlEntities(title),
-        subtitle = if (subscribers.isBlank()) "Channel" else subscribers,
+        subtitle = subscribers.ifBlank { "Channel" },
         tokenContent = handle?.removePrefix("/")?.takeIf { it.isNotEmpty() }
             ?: "channel/$id"
     )
@@ -167,7 +170,7 @@ private fun parseSearchChannel(channel: JsonObject): MediaSearchResult? {
 internal fun parseYouTubeSearchResults(jsonText: String): List<MediaSearchResult> {
     val results = mutableListOf<MediaSearchResult>()
     runCatching {
-        val root = Json { ignoreUnknownKeys = true }
+        val root = YT_SEARCH_JSON
             .parseToJsonElement(jsonText).jsonObject
         val sections = root["contents"]?.jsonObject
             ?.get("twoColumnSearchResultsRenderer")?.jsonObject
@@ -205,11 +208,11 @@ internal fun parseYouTubeSearchResults(jsonText: String): List<MediaSearchResult
 suspend fun searchYouTube(query: String): List<MediaSearchResult> {
     val trimmed = query.trim()
     if (trimmed.length < 2) return emptyList()
-    val url = "https://www.youtube.com/results?search_query=" +
-        URLEncoder.encode(trimmed, StandardCharsets.UTF_8.name())
     return withContext(Dispatchers.IO) {
+        val url = "https://www.youtube.com/results?search_query=" +
+            URLEncoder.encode(trimmed, StandardCharsets.UTF_8.name())
         runCatching {
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = URI(url).toURL().openConnection() as HttpURLConnection
             conn.connectTimeout = SEARCH_TIMEOUT_MILLIS
             conn.readTimeout = SEARCH_TIMEOUT_MILLIS
             conn.setRequestProperty("User-Agent", APP_USER_AGENT)

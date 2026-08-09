@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import data.SoundEvent
 import data.SoundManager
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 import model.ParsedNote
 import kotlin.math.roundToInt
 
@@ -279,10 +280,10 @@ internal fun NoteFileCard(
 ) {
     val hoverSource = remember { MutableInteractionSource() }
     val isHovered by hoverSource.collectIsHoveredAsState()
-    androidx.compose.runtime.LaunchedEffect(isHovered) {
+    LaunchedEffect(isHovered) {
         if (isHovered) {
-            kotlinx.coroutines.delay(60)
-            data.SoundManager.play(data.SoundEvent.Hover)
+            delay(60.milliseconds)
+            SoundManager.play(SoundEvent.Hover)
         }
     }
 
@@ -296,7 +297,7 @@ internal fun NoteFileCard(
             .fillMaxWidth()
             .hoverable(hoverSource)
             .clickable {
-                data.SoundManager.play(data.SoundEvent.Click)
+                SoundManager.play(SoundEvent.Click)
                 onClick()
             }
     ) {
@@ -317,7 +318,7 @@ internal fun NoteFileCard(
                         modifier = Modifier
                             .padding(start = 6.dp)
                             .clickable {
-                                data.SoundManager.play(data.SoundEvent.Click)
+                                SoundManager.play(SoundEvent.Click)
                                 onMove()
                             }
                     )
@@ -332,7 +333,7 @@ internal fun NoteFileCard(
                         modifier = Modifier
                             .padding(start = 6.dp)
                             .clickable {
-                                data.SoundManager.play(data.SoundEvent.Click)
+                                SoundManager.play(SoundEvent.Click)
                                 onDelete()
                             }
                     )

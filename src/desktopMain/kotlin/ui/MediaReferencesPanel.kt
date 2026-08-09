@@ -5,7 +5,12 @@
 
 package ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -20,7 +25,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +36,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -80,6 +85,7 @@ import data.isPlayable
 import data.isProfile
 import data.mediaKindFor
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 
 
 // ---------------------------------------------------------------------------
@@ -94,25 +100,24 @@ import kotlinx.coroutines.delay
 // the "title - channel" line; when the oEmbed fetch fails entirely it
 // shows the service + id (or domain + URL for generic links).
 //
-// Playback: hovering a PLAYABLE card (video / song services — not plain
-// links) reveals a ▶ button over its thumbnail or icon. Clicking it
-// starts in-app playback in the always-on-top player window
-// (MediaPlayerController); while playing, the card paints live progress
-// — a bottom bar on 16:9 video thumbnails, a circular ring around square
-// album art / icons, and colored-in sound waves for SoundCloud — with a
-// pause/play toggle and a stop button. Plain links keep opening in the
-// browser.
+// Playback: clicking a PLAYABLE card (video / song services — not plain
+// links) — or hovering its thumbnail for the ▶ overlay — starts in-app
+// playback in the embedded player (MediaPlayerController); while
+// playing, the card paints live progress — a bottom bar on 16:9 video
+// thumbnails, a circular ring around square album art / icons, and
+// colored-in sound waves for SoundCloud — with a pause/play toggle and a
+// stop button. Plain links keep opening in the browser.
 // ---------------------------------------------------------------------------
 
 /** Service-brand accent used for the card header label and progress
  *  visuals (blue, matching the reference cards' link color). Shared with
- *  the MiniPlayer. */
+ *  the embedded player. */
 internal val MediaAccent = Color(DEFAULT_ACCENT_ARGB)
 
 /** How long to wait for an embed's first real event before the watchdog
  *  rescues a card stuck on "playing" (see the watchdog effect above).
- *  Shared with the MiniPlayer, which runs its own watchdog while the
- *  notes screen (and this panel) aren't composed. */
+ *  Shared with the embedded player, which runs its own watchdog while
+ *  the notes screen (and this panel) aren't composed. */
 internal const val WATCHDOG_GRACE_MILLIS = 8000L
 
 
@@ -122,6 +127,13 @@ internal const val WATCHDOG_GRACE_MILLIS = 8000L
  * thumbnails on a background coroutine, deduped by resolved URL, with
  * per-card loading / fallback states. Hidden entirely when the note
  * contains no media references.
+ *
+ * Hover-expand ("swoop up"): when the note HAS media, the section
+ * collapses to a thin grip strip at the bottom of the editor and
+ * expands upward while the cursor is over it — the same hover pattern
+ * as the notes sidebar (with the matching Open/Close sound blip). It
+ * stays expanded while something is playing so the card's live
+ * progress and controls don't vanish when the cursor leaves.
  */
 @Composable
 internal fun MediaReferencesPanel(
@@ -187,9 +199,9 @@ internal fun MediaReferencesPanel(
     }
 
     // NOTE: leaving the notes screen / opening another note does NOT stop
-    // playback — the always-on-top player window keeps playing and the
-    // MiniPlayer (bottom-right of the main window) takes over the
-    // pause/close controls from any screen.
+    // playback — the embedded player (bottom-right of the main window)
+    // keeps playing and takes over the pause/close controls from any
+    // screen.
 
     // Watchdog: if a playable embed never reports a real state event
     // (blocked / region-restricted / offline — the optimistic "playing"
@@ -205,73 +217,126 @@ internal fun MediaReferencesPanel(
         if (!MediaPlayerState.playing || token.service == MediaService.SPOTIFY) {
             return@LaunchedEffect
         }
-        delay(WATCHDOG_GRACE_MILLIS)
+        delay(WATCHDOG_GRACE_MILLIS.milliseconds)
         val stale = System.currentTimeMillis() - MediaPlayerState.lastEventAt > WATCHDOG_GRACE_MILLIS
         if (stale && MediaPlayerState.playing && MediaPlayerState.currentUrl == url) {
             MediaPlayerState.playing = false
         }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Media References",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        // Cards in a 2-column grid (fits the editor pane in both
-        // standalone and split layouts); a lone trailing card gets a
-        // spacer to keep the rhythm. Bounded height with internal scroll
-        // so a long list can't crush the editor above it.
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 340.dp)
-                .verticalScroll(rememberScrollState())
+    // Hover-driven expand ("swoop up"): the section collapses to a thin
+    // grip strip at the bottom of the editor and expands upward while the
+    // cursor is over it — the same pattern as the notes sidebar. A single
+    // InteractionSource on the outer Box keeps hover continuous while the
+    // cursor moves between the always-present strip and the animating
+    // panel (their bounds change during the expand/shrink animation).
+    val mediaHoverSource = remember { MutableInteractionSource() }
+    val isMediaHovered by mediaHoverSource.collectIsHoveredAsState()
+    // Pinned open while something is playing — the card's live progress
+    // and pause/stop controls must not vanish the moment the cursor
+    // leaves the panel.
+    val showMedia = isMediaHovered || MediaPlayerState.currentUrl != null
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .hoverable(mediaHoverSource)
+            .soundHoverOn(mediaHoverSource)
+    ) {
+        if (!showMedia) {
+            // Collapsed grip strip: the small "area" the cursor enters to
+            // swoop the media section up. A subtle rounded pill mirrors
+            // the notes sidebar's trigger line.
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = showMedia,
+            enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
+            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
         ) {
-            tokens.chunked(2).forEach { rowTokens ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+            // One Open/Close blip per genuine visibility transition
+            // (debounced inside PlayOpenCloseSound, so rapid hover
+            // wavering does not cause repeated sonic bursts).
+            PlayOpenCloseSound(visible = showMedia)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Media References",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                // Cards in a 2-column grid (fits the editor pane in both
+                // standalone and split layouts); a lone trailing card gets
+                // a spacer to keep the rhythm. Bounded height with
+                // internal scroll so a long list can't crush the editor
+                // above it.
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 340.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    rowTokens.forEach { token ->
-                        val url = token.resolveUrl().orEmpty()
-                        when {
-                            token.service == MediaService.FILE ->
-                                // Embedded local files get a media-only card
-                                // (image shown, video/audio playable) with
-                                // no title / artist metadata.
-                                FileCard(
-                                    token = token,
-                                    modifier = Modifier.weight(1f)
-                                )
+                    tokens.chunked(2).forEach { rowTokens ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            rowTokens.forEach { token ->
+                                val url = token.resolveUrl().orEmpty()
+                                when {
+                                    token.service == MediaService.FILE ->
+                                        // Embedded local files get a media-only
+                                        // card (image shown, video/audio
+                                        // playable) with no title / artist
+                                        // metadata.
+                                        FileCard(
+                                            token = token,
+                                            modifier = Modifier.weight(1f)
+                                        )
 
-                            token.isProfile ->
-                                // YouTube channel / Spotify user or artist:
-                                // avatar + name beside it, click opens the
-                                // profile page in the browser.
-                                ProfileCard(
-                                    token = token,
-                                    info = profiles[url],
-                                    avatar = avatars[url],
-                                    loading = profileLoading[url] ?: false,
-                                    onClick = { if (url.isNotBlank()) onOpenUrl(url) },
-                                    modifier = Modifier.weight(1f)
-                                )
+                                    token.isProfile ->
+                                        // YouTube channel / Spotify user or
+                                        // artist: avatar + name beside it,
+                                        // click opens the profile page in the
+                                        // browser.
+                                        ProfileCard(
+                                            token = token,
+                                            info = profiles[url],
+                                            avatar = avatars[url],
+                                            loading = profileLoading[url] ?: false,
+                                            onClick = { if (url.isNotBlank()) onOpenUrl(url) },
+                                            modifier = Modifier.weight(1f)
+                                        )
 
-                            else -> MediaCard(
-                                token = token,
-                                info = previews[url],
-                                thumbnail = thumbnails[url],
-                                duration = durations[url],
-                                loading = loading[url] ?: false,
-                                onClick = { if (url.isNotBlank()) onOpenUrl(url) },
-                                modifier = Modifier.weight(1f)
-                            )
+                                    else -> MediaCard(
+                                        token = token,
+                                        info = previews[url],
+                                        thumbnail = thumbnails[url],
+                                        duration = durations[url],
+                                        loading = loading[url] ?: false,
+                                        onClick = { if (url.isNotBlank()) onOpenUrl(url) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            if (rowTokens.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
                         }
-                    }
-                    if (rowTokens.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -284,9 +349,9 @@ internal fun MediaReferencesPanel(
  * One rich media card: service header, thumbnail (with duration badge)
  * and title + channel underneath — falling back to a "title - channel"
  * text line when no thumbnail is available, and to a plain
- * service/id/domain line when the oEmbed fetch fails outright. Playable
- * services get a hover ▶ over the thumbnail / icon that starts in-app
- * playback; while playing, live progress is painted over the media area.
+ * service/id/domain line when the oEmbed fetch fails outright. Clicking
+ * a PLAYABLE card (or its hover ▶) starts in-app playback; while
+ * playing, live progress is painted over the media area.
  */
 @Composable
 private fun MediaCard(
@@ -320,7 +385,23 @@ private fun MediaCard(
         ),
         modifier = modifier
             .clip(shape)
-            .clickable { onClick() }
+            .clickable {
+                // Playable services (YouTube / Spotify / Vimeo /
+                // SoundCloud) PLAY in-app on click — the same action as
+                // the hover ▶, so the whole card is one big play button.
+                // A card already playing toggles pause/resume; only plain
+                // links (and profiles, handled by ProfileCard) open the
+                // browser via onClick.
+                if (token.service.isPlayable) {
+                    if (isNowPlaying) {
+                        MediaPlayerController.togglePlayPause()
+                    } else {
+                        MediaPlayerController.play(token, info?.title)
+                    }
+                } else {
+                    onClick()
+                }
+            }
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             // ---- Header: service glyph + label ----
@@ -1025,7 +1106,7 @@ private fun AudioFileCard(
  * track with an accent fill whose width tracks [fraction].
  */
 @Composable
-private fun BoxScope.VideoProgressBar(fraction: Float, modifier: Modifier = Modifier) {
+private fun VideoProgressBar(fraction: Float, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -1090,7 +1171,7 @@ private fun ProgressRing(fraction: Float, animate: Boolean, modifier: Modifier =
  * and dimmed beyond it.
  */
 @Composable
-private fun BoxScope.SoundWaveFill(fraction: Float, seed: Int, modifier: Modifier = Modifier) {
+private fun SoundWaveFill(fraction: Float, seed: Int, modifier: Modifier = Modifier) {
     val bars = remember(seed) { waveformHeights(seed, 18) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1117,9 +1198,7 @@ private fun BoxScope.SoundWaveFill(fraction: Float, seed: Int, modifier: Modifie
 
 
 /**
- * Round translucent button with a ▶ / ⏸ glyph. Used for the hover "play"
- * overlay, as the persistent pause/play control while playing, and in
- * the MiniPlayer.
+ * Round translucent button with a ▶ / ⏸ glyph. Used for the hover "play" *  overlay and as the persistent pause/play control while playing.
  */
 @Composable
 internal fun PlayPauseButton(
@@ -1166,8 +1245,8 @@ internal fun PlayPauseButton(
 }
 
 
-/** Small round ✕-style stop control in the corner of a playing card (and
- *  the MiniPlayer's close button). */
+/** Small round ✕-style stop control in the corner of a playing card and
+ *  the embedded player. */
 @Composable
 internal fun StopButton(onStop: () -> Unit, modifier: Modifier = Modifier) {
     Box(

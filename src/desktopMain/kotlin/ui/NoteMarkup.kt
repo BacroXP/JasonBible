@@ -40,12 +40,6 @@ internal enum class LineAlignment(val marker: String, val label: String) {
     LEFT("", "Left"),
     CENTER(ALIGN_CENTER, "Center"),
     RIGHT(ALIGN_RIGHT, "Right");
-
-    companion object {
-        /** Alignment for a marker char (empty string → LEFT). */
-        fun fromMarker(marker: String): LineAlignment =
-            entries.firstOrNull { it.marker == marker } ?: LEFT
-    }
 }
 
 /** Alignment marker present at the line start (empty = left/default). */
@@ -84,14 +78,14 @@ internal val orderedListRegex = Regex("^\\d+\\.\\s+")
 // notes written before the `&` syntax); a cross-chapter end is written
 // `-&C2&V2` (e.g. `$Lukas&7&1-&8&1` = Luk 7:1 to 8:1).
 internal val referenceLineRegex =
-    Regex("^\\\$([^\\\$&]+)(?:[\\\$&](\\d+)(?:[\\\$&](\\d+)(\\+\\d*|-[\\\$&]?\\d+(?:[\\\$&]\\d+)?(?:\\+\\d*)?)?(?:\\s+(.*))?)?)?\\s*$")
+    Regex("^\\$([^\\$&]+)(?:[\\$&](\\d+)(?:[\\$&](\\d+)(\\+\\d*|-[\\$&]?\\d+(?:[\\$&]\\d+)?(?:\\+\\d*)?)?(?:\\s+(.*))?)?)?\\s*$")
 internal val coloredQuoteRegex =
-    Regex("^\"(.+?)\"(?:\\[#([0-9A-Fa-f]{3,8})])?\\s*(.*)\$")
+    Regex("^\"(.+?)\"(?:\\[#([0-9A-Fa-f]{3,8})])?\\s*(.*)$")
 
 // Matches a `[#hex]` colour marker anywhere in a line. Used by the
 // toolbar's "no colour" dot to strip highlight colours while keeping the
 // quote markers themselves intact.
-internal val colorMarkerRegex = Regex("\\[(?:#[0-9A-Fa-f]{3,8})]")
+internal val colorMarkerRegex = Regex("\\[#[0-9A-Fa-f]{3,8}]")
 
 internal val INLINE_BOLD = Regex("\\*\\*([^*]+)\\*\\*")
 internal val INLINE_ITALIC = Regex("(?<!\\*)\\*([^*]+)\\*(?!\\*)")

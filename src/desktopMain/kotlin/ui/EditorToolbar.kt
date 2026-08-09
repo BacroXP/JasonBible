@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
@@ -166,7 +166,7 @@ internal fun EditorToolbar(
                                 }
                             )
                         }
-                        // Word's "No colour": strips [#hex] markers, keeps the quote.
+                        // Word's "No color": strips [#hex] markers, keeps the quote.
                         NoColorDot(tooltip = "Remove highlight color", onClick = onRemoveColor)
                         // Custom color: rainbow dot opens the color picker
                         // dialog; the chosen color is applied to the
@@ -304,7 +304,7 @@ internal fun EditorToolbar(
 
 /**
  * One row of the 3-row editor ribbon. Each row is a horizontally
- * scrollable strip of labelled groups, so on very narrow windows (e.g.
+ * scrollable strip of labeled groups, so on very narrow windows (e.g.
  * the SPLIT pane) the ribbon clips gracefully instead of overflowing.
  */
 @Composable
@@ -388,7 +388,7 @@ private fun RibbonTabBar(
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                 },
                 modifier = Modifier.clickable {
-                    data.SoundManager.play(data.SoundEvent.Click)
+                    SoundManager.play(SoundEvent.Click)
                     onSelect(tab)
                 }
             ) {
@@ -441,7 +441,7 @@ private fun StyleDropdown(
                 modifier = Modifier
                     .height(28.dp)
                     .clickable {
-                        data.SoundManager.play(data.SoundEvent.Click)
+                        SoundManager.play(SoundEvent.Click)
                         expanded = true
                     }
             ) {
@@ -478,7 +478,7 @@ private fun StyleDropdown(
                         text = { Text(style.label) },
                         onClick = {
                             expanded = false
-                            data.SoundManager.play(data.SoundEvent.Click)
+                            SoundManager.play(SoundEvent.Click)
                             if (style != currentStyle) onStyleSelected(style)
                         }
                     )
@@ -506,7 +506,7 @@ private fun InlineButton(
         modifier = Modifier
             .height(28.dp)
             .clickable {
-                data.SoundManager.play(data.SoundEvent.Click)
+                SoundManager.play(SoundEvent.Click)
                 onClick()
             }
     ) {
@@ -547,7 +547,7 @@ private fun StyleButton(
             modifier = Modifier
                 .height(28.dp)
                 .clickable {
-                    data.SoundManager.play(data.SoundEvent.Click)
+                    SoundManager.play(SoundEvent.Click)
                     onClick()
                 }
         ) {
@@ -588,7 +588,9 @@ internal fun ToolbarTip(
     // The optional `shortcut` renders as a small kbd-style chip under
     // the label, e.g. "Bold" + "Ctrl+B".
     TooltipBox(
-        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(),
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+            preferredPlacement = TooltipAnchorPosition.Above
+        ),
         state = rememberTooltipState(),
         tooltip = {
             Surface(
@@ -652,7 +654,7 @@ internal fun ToolbarActionButton(
                 .height(28.dp)
                 .then(
                     if (enabled) Modifier.clickable {
-                        data.SoundManager.play(data.SoundEvent.Click)
+                        SoundManager.play(SoundEvent.Click)
                         onClick()
                     } else Modifier
                 )
@@ -710,7 +712,7 @@ private fun ListButton(
             modifier = Modifier
                 .height(28.dp)
                 .clickable {
-                    data.SoundManager.play(data.SoundEvent.Click)
+                    SoundManager.play(SoundEvent.Click)
                     onClick()
                 }
         ) {
@@ -747,7 +749,7 @@ private fun ColorDot(
             .size(20.dp)
             .background(color.copy(alpha = 0.85f), CircleShape)
             .clickable {
-                data.SoundManager.play(data.SoundEvent.Click)
+                SoundManager.play(SoundEvent.Click)
                 onClick()
             }
     )
@@ -761,7 +763,7 @@ private fun NoColorDot(
     shortcut: String? = null,
     onClick: () -> Unit
 ) {
-    // Hollow circle with a diagonal slash — Word's "No colour" swatch:
+    // Hollow circle with a diagonal slash — Word's "No color" swatch:
     // strips [#hex] highlight markers from the selection / cursor line.
     val lineColor = MaterialTheme.colorScheme.onSurfaceVariant
     ToolbarTip(label = tooltip ?: "No colour", shortcut = shortcut) {
@@ -770,7 +772,7 @@ private fun NoColorDot(
             .size(20.dp)
             .border(1.dp, lineColor.copy(alpha = 0.8f), CircleShape)
             .clickable {
-                data.SoundManager.play(data.SoundEvent.Click)
+                SoundManager.play(SoundEvent.Click)
                 onClick()
             }
     ) {

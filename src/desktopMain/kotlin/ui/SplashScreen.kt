@@ -16,8 +16,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.decodeToImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.dp
+
+
+/**
+ * Loads a bundled classpath image (e.g. `icons/Icon.png`) as a Painter —
+ * the non-deprecated replacement for the removed
+ * `painterResource(resourcePath)` classpath overload.
+ */
+@Composable
+internal fun rememberClasspathPainter(path: String): Painter {
+    val bytes = remember(path) {
+        val stream = checkNotNull(SplashScreen::class.java.getResourceAsStream("/$path")) {
+            "Missing bundled resource /$path"
+        }
+        stream.use { it.readBytes() }
+    }
+    return remember(path) { BitmapPainter(bytes.decodeToImageBitmap()) }
+}
 
 
 /**
@@ -38,7 +57,7 @@ fun SplashScreen(progress: Float) {
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             Image(
-                painter = painterResource("icons/Icon.png"),
+                painter = rememberClasspathPainter("icons/Icon.png"),
                 contentDescription = null,
                 modifier = Modifier.size(96.dp)
             )

@@ -42,6 +42,7 @@ import data.SettingsManager
 import data.SoundManager
 import data.SoundEvent
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 import model.Book
 import java.time.LocalDate
 import java.util.Random
@@ -270,7 +271,7 @@ fun HomeScreen(
                             val isHovered by linkHover.collectIsHoveredAsState()
                             LaunchedEffect(isHovered) {
                                 if (isHovered) {
-                                    delay(60)
+                                    delay(60.milliseconds)
                                     SoundManager.play(SoundEvent.Hover)
                                 }
                             }
@@ -453,7 +454,7 @@ private fun ReadingPlanCard(
                             val isHovered by rowHover.collectIsHoveredAsState()
                             LaunchedEffect(isHovered) {
                                 if (isHovered) {
-                                    delay(60)
+                                    delay(60.milliseconds)
                                     SoundManager.play(SoundEvent.Hover)
                                 }
                             }

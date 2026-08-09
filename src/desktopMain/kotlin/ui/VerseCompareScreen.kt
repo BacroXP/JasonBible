@@ -81,7 +81,6 @@ fun VerseCompareScreen(
     // have (e.g. switching from Psalms 150 to John must not keep "150").
     // Same clamping semantics as [resolveCompareReference].
     val currentBook = loaded?.find { it.book == bookNumber }
-    val currentChapter = currentBook?.chapters?.find { it.chapter == chapterNumber }
 
     // Translations to compare, grouped by language. Default: the active
     // translation plus every translation of the same language.

@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,9 +40,10 @@ import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.ui.input.pointer.pointerMoveFilter
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.LinkInteractionListener
@@ -68,6 +70,8 @@ import model.Book
 import model.Verse
 import java.awt.datatransfer.StringSelection
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 
 
@@ -340,7 +344,6 @@ internal fun VerseRow(
 
     val highlightColor = when {
         markerPreview != null && (selected || hoverHighlighted) -> colorFromHexInternal(markerPreview).copy(alpha = 0.32f)
-        markerPreview != null && hoverHighlighted -> colorFromHexInternal(markerPreview).copy(alpha = 0.22f)
         markerPreview != null -> colorFromHexInternal(markerPreview).copy(alpha = 0.18f)
         selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
         hoverHighlighted -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
@@ -387,16 +390,8 @@ internal fun VerseRow(
                         supportedActions = listOf(DragAndDropTransferAction.Copy)
                     )
                 }
-                .pointerMoveFilter(
-                    onEnter = {
-                        hovered = true
-                        false
-                    },
-                    onExit = {
-                        hovered = false
-                        false
-                    }
-                )
+                .onPointerEvent(PointerEventType.Enter) { hovered = true }
+                .onPointerEvent(PointerEventType.Exit) { hovered = false }
                 .clickable { onClick() }
         ) {
             Box {
@@ -717,7 +712,7 @@ private fun NoteChip(
     val isHovered by hoverSource.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -749,7 +744,7 @@ private fun StarGlyph(
     val isHovered by hoverSource.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -842,11 +837,12 @@ internal fun CopyPill(
     modifier: Modifier = Modifier,
     label: String = "Copy"
 ) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipboardScope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) {
         if (copied) {
-            delay(1500)
+            delay(1500.milliseconds)
             copied = false
         }
     }
@@ -854,7 +850,7 @@ internal fun CopyPill(
     val isHovered by hoverSource.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -870,7 +866,9 @@ internal fun CopyPill(
             .hoverable(hoverSource)
             .clickable {
                 SoundManager.play(SoundEvent.Click)
-                clipboard.setText(AnnotatedString(copyText))
+                clipboardScope.launch {
+                    clipboard.setClipEntry(plainTextClipEntry(copyText))
+                }
                 copied = true
             }
             .background(

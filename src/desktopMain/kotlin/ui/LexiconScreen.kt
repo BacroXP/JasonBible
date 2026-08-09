@@ -50,7 +50,6 @@ import data.SoundManager
 import data.StrongsRepository
 import data.WordLexicon
 import data.WordLexicon.LanguageKind
-import model.Book
 
 
 /**

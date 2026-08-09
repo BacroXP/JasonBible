@@ -1,3 +1,9 @@
+@file:Suppress("DEPRECATION", "MarkedForRemoval")
+// JavaFX WebEngine.executeScript returns `netscape.javascript.JSObject`
+// for JS objects, and that JDK module is deprecated for removal — but
+// JavaFX still uses it for the JS bridge and offers no replacement, so
+// the suppression (kept tightly scoped to this file) is required.
+
 package ui
 
 import androidx.compose.runtime.getValue
@@ -12,45 +18,44 @@ import data.mediaKindFor
 import data.openExternalUrl
 import javafx.application.Platform
 import javafx.concurrent.Worker
-import javafx.event.EventHandler
+import javafx.embed.swing.JFXPanel
 import javafx.geometry.Pos
+import javafx.scene.Parent
 import javafx.scene.Scene
-import javafx.scene.control.Label
 import javafx.scene.layout.StackPane
 import javafx.scene.media.Media
 import javafx.scene.media.MediaPlayer
 import javafx.scene.media.MediaView
-import javafx.scene.paint.Color
-import javafx.scene.text.Font
 import javafx.scene.web.WebEngine
 import javafx.scene.web.WebView
-import javafx.stage.Stage
+import netscape.javascript.JSObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import netscape.javascript.JSObject
 
 
 // ---------------------------------------------------------------------------
 // In-app media playback
 //
-// The play button on a media card opens a small always-on-top player
-// window. YouTube / Vimeo / SoundCloud / local files are played NATIVELY
-// by JavaFX's MediaPlayer: the bundled yt-dlp binary resolves the media
-// to a DIRECT stream URL (e.g. a googlevideo mp4), which JavaFX streams
-// with GStreamer. That sidesteps the entire class of WebView-embed
-// failures — most notably YouTube's 2025+ embed validation (\"Error 153:
-// Video player configuration error\"), which rejects embeds hosted from a
-// local document with no real origin. Spotify alone keeps the embedded
-// WebView player, because its tracks/albums have no public direct stream
-// (yt-dlp cannot resolve them); its embed has no event API either, so
-// Spotify shows an indeterminate progress ring.
+// The play button on a media card starts playback INSIDE the main app
+// window: the Compose side (ui.EmbeddedPlayer) hosts a JFXPanel via
+// Compose's SwingPanel bridge, and this controller mounts the JavaFX
+// content onto it. YouTube / Vimeo / SoundCloud / local files are played
+// NATIVELY by JavaFX's MediaPlayer: the bundled yt-dlp binary resolves
+// the media to a DIRECT stream URL (e.g. a googlevideo mp4), which JavaFX
+// streams with GStreamer. That sidesteps the entire class of WebView-embed
+// failures — most notably YouTube's 2025+ embed validation ("Error 153:
+// Video player configuration error"), which rejects embeds hosted from a
+// local document with no real origin. Spotify alone keeps a WebView
+// player, because its tracks/albums have no public direct stream (yt-dlp
+// cannot resolve them); its embed has no event API either, so Spotify
+// shows an indeterminate progress state.
 //
 // Progress (position, play/pause/end) flows from the native player's
 // listeners — or, for Spotify, not at all — into [MediaPlayerState]; the
-// media cards and the mini player paint live progress from it.
+// media cards and the embedded player paint live progress from it.
 //
 // JavaFX is a separate toolkit that coexists with Compose/AWT: it is
 // started once, lazily, on the first play (never on app startup), and
@@ -62,10 +67,10 @@ import netscape.javascript.JSObject
 
 
 /**
- * Snapshot-backed playback state shared between the JavaFX player window
- * (writer: the native player's listeners / JS bridge on the FX thread)
- * and the Compose media cards (reader: composition). Snapshot state is
- * thread-safe, so the two sides never need to synchronize.
+ * Snapshot-backed playback state shared between the JavaFX player (writer:
+ * the native player's listeners / JS bridge on the FX thread) and the
+ * Compose media cards / embedded player (reader: composition). Snapshot
+ * state is thread-safe, so the two sides never need to synchronize.
  */
 object MediaPlayerState {
 
@@ -88,7 +93,7 @@ object MediaPlayerState {
     /**
      * Millis of the last REAL state/progress event from the player
      * (played / paused / finished / progress). Not snapshot state — no UI
-     * reads it; it feeds the \"player never started\" watchdog in
+     * reads it; it feeds the "player never started" watchdog in
      * MediaReferencesPanel. Reset to 0 whenever playback stops.
      */
     @Volatile
@@ -113,6 +118,9 @@ object MediaPlayerState {
  * native path.
  */
 private class MediaPlayerBridge {
+    // Called from the Spotify embed page via `window.JavaBridge.progress`
+    // — invisible to static analysis, hence the suppression.
+    @Suppress("unused")
     fun progress(secs: Double, dur: Double, playing: Boolean, paused: Boolean, finished: Boolean) {
         if (dur > 0) {
             MediaPlayerState.fraction = (secs / dur).toFloat().coerceIn(0f, 1f)
@@ -134,11 +142,14 @@ private class MediaPlayerBridge {
 
 
 /**
- * Owns the JavaFX toolkit and the two player windows: the native
- * [MediaPlayer] stage (YouTube / Vimeo / SoundCloud / local files) and
- * the Spotify embed [WebView] stage. All JavaFX calls are confined to the
- * FX thread via [Platform.runLater]; the public API is safe to call from
- * any Compose callback.
+ * Owns the JavaFX toolkit and the embedded player content: the native
+ * [MediaPlayer] (YouTube / Vimeo / SoundCloud / local files) and the
+ * Spotify embed [WebView]. The content is mounted onto a [JFXPanel] host
+ * that the Compose side creates (ui.EmbeddedPlayer via SwingPanel), so
+ * playback renders inside the main window rather than a separate OS
+ * window. All JavaFX calls are confined to the FX thread via
+ * [Platform.runLater]; the public API is safe to call from any Compose
+ * callback.
  */
 object MediaPlayerController {
 
@@ -151,26 +162,35 @@ object MediaPlayerController {
 
     private var currentToken: MediaReferenceToken? = null
 
-    // Native (JavaFX MediaPlayer) path.
-    private var nativeStage: Stage? = null
-    private var mediaView: MediaView? = null
-    private var nativePlayer: MediaPlayer? = null
+    // Embedded host: the JFXPanel created by the Compose-side SwingPanel
+    // (ui.EmbeddedPlayer). All playback renders INSIDE the main window.
+    @Volatile
+    private var hostPanel: JFXPanel? = null
 
-    // Embed (WebView) path — Spotify only.
-    private var embedStage: Stage? = null
+    /** The JavaFX scene root currently built for the host (a MediaView
+     *  for native media, a WebView for Spotify). Kept so a host panel
+     *  that composes AFTER play() still receives the content (attachHost
+     *  pushes it). FX-thread confined. */
+    private var currentRoot: Parent? = null
+
+    // Native (JavaFX MediaPlayer) content.
+    private var nativePlayer: MediaPlayer? = null
+    private var mediaView: MediaView? = null
+
+    // Embed (WebView) content — Spotify only.
+    private var webView: WebView? = null
     private var webEngine: WebEngine? = null
 
     /**
-     * Open (or reuse) the always-on-top player window and start [token]
-     * playing. Falls back to the default browser when JavaFX is
-     * unavailable, the stream can't be resolved, or the token isn't
-     * playable in-app (generic links, profiles). [title] (oEmbed title)
-     * becomes the window title.
+     * Open the embedded player and start [token] playing. Falls back to
+     * the default browser when JavaFX is unavailable, the stream can't be
+     * resolved, or the token isn't playable in-app (generic links,
+     * profiles). [title] (oEmbed title) labels the player.
      */
     fun play(token: MediaReferenceToken, title: String? = null) {
         if (token.isProfile) {
             // Channel / profile pages have nothing to play — open in the
-            // browser instead of a dead player window.
+            // browser instead of a dead player panel.
             fallbackToBrowser(token)
             return
         }
@@ -188,7 +208,7 @@ object MediaPlayerController {
 
         when (token.service) {
             // Spotify: the only service without a public direct stream —
-            // keep its official embed in the WebView window.
+            // keep its official embed in the embedded WebView.
             MediaService.SPOTIFY -> {
                 val embedUrl = token.playerUrl()
                 if (embedUrl == null) {
@@ -196,7 +216,7 @@ object MediaPlayerController {
                     return
                 }
                 Platform.runLater {
-                    runCatching { ensureEmbedStage(embedUrl) }
+                    runCatching { ensureEmbedContent(embedUrl) }
                         .onFailure { fallbackToBrowser(token) }
                 }
             }
@@ -210,7 +230,7 @@ object MediaPlayerController {
                 }
                 val isVideo = mediaKindFor(fileUrl) == MediaFileKind.VIDEO
                 Platform.runLater {
-                    runCatching { ensureNativeStage(fileUrl, isVideo) }
+                    runCatching { ensureNativeContent(fileUrl, isVideo) }
                         .onFailure { fallbackToBrowser(token) }
                 }
             }
@@ -227,7 +247,7 @@ object MediaPlayerController {
                     val isVideo = token.service == MediaService.YOUTUBE ||
                         token.service == MediaService.VIMEO
                     Platform.runLater {
-                        runCatching { ensureNativeStage(stream, isVideo) }
+                        runCatching { ensureNativeContent(stream, isVideo) }
                             .onFailure { fallbackToBrowser(token) }
                     }
                 }
@@ -252,7 +272,7 @@ object MediaPlayerController {
         }
     }
 
-    /** Stop playback, hide the player window and clear the card state. */
+    /** Stop playback, clear the embedded player and the card state. */
     fun stop() {
         currentToken = null
         MediaPlayerState.reset()
@@ -262,34 +282,43 @@ object MediaPlayerController {
                 nativePlayer?.dispose()
                 nativePlayer = null
                 mediaView?.mediaPlayer = null
-                nativeStage?.hide()
-                embedStage?.hide()
+                mediaView = null
+                webEngine?.load(null)
+                webView = null
+                // Blank the host so a stale frame doesn't linger while the
+                // Compose side tears the panel down.
+                currentRoot = null
+                hostPanel?.scene = Scene(StackPane().apply {
+                    style = "-fx-background-color: #000;"
+                })
             }
         }
     }
 
     /**
-     * Bring the always-on-top player window back to the front WITHOUT
-     * touching playback — the mini player's \"open player\" action, so a
-     * click re-opens the window instead of restarting the media. No-op
-     * when the window hasn't been created yet.
+     * Register the [JFXPanel] host created by the Compose-side SwingPanel
+     * (ui.EmbeddedPlayer). If content was already built (play ran before
+     * the panel composed), it is pushed onto the panel now.
      */
-    fun showPlayerWindow() {
+    fun attachHost(panel: JFXPanel) {
+        hostPanel = panel
         Platform.runLater {
+            val root = currentRoot ?: return@runLater
+            // Idempotent: SwingPanel's `update` fires on every
+            // recomposition (e.g. native progress ticks), and re-parenting
+            // the root into a fresh Scene each time would be wasteful — and
+            // for the Spotify WebView could detach/reload the page.
+            if (panel.scene?.root === root) return@runLater
             runCatching {
-                when {
-                    embedStage != null -> {
-                        embedStage?.show()
-                        embedStage?.toFront()
-                    }
-
-                    nativeStage != null -> {
-                        nativeStage?.show()
-                        nativeStage?.toFront()
-                    }
-                }
+                val (w, h) = sceneSize(panel)
+                panel.scene = Scene(root, w, h)
             }
         }
+    }
+
+    /** The host panel is leaving composition — drop the reference. */
+    fun detachHost(panel: JFXPanel) {
+        if (hostPanel === panel) hostPanel = null
     }
 
     /**
@@ -302,8 +331,8 @@ object MediaPlayerController {
             nativePlayer?.stop()
             nativePlayer?.dispose()
             nativePlayer = null
-            nativeStage?.hide()
-            embedStage?.hide()
+            webEngine?.load(null)
+            webView = null
         }
         runCatching { Platform.exit() }
     }
@@ -320,27 +349,37 @@ object MediaPlayerController {
     }
 
     /**
-     * Create the native player stage on first use; on reuse, tear down
-     * the previous MediaPlayer and play the new stream in the same stage.
-     * All state → [MediaPlayerState] updates come from the player's
-     * listeners, which also feed the \"never started\" watchdog.
+     * Build the native JavaFX content ([MediaPlayer] + [MediaView]) for
+     * [streamUrl] and mount it on the embedded host. All state →
+     * [MediaPlayerState] updates come from the player's listeners, which
+     * also feed the "never started" watchdog.
      */
-    private fun ensureNativeStage(streamUrl: String, isVideo: Boolean) {
-        val existing = nativeStage
-
-        // Release the previous native playback before loading a new one.
+    private fun ensureNativeContent(streamUrl: String, isVideo: Boolean) {
+        // Release the previous native playback / embed content.
         nativePlayer?.stop()
         nativePlayer?.dispose()
+        nativePlayer = null
         mediaView?.mediaPlayer = null
+        mediaView = null
+        webEngine?.load(null)
+        webView = null
 
         val player = MediaPlayer(Media(streamUrl))
         nativePlayer = player
 
+        // True once this player has actually started playing — drives the
+        // error fallback below (fall back only when playback NEVER
+        // started, not on a mid-stream blip).
+        var startedPlaying = false
+
+        // All listeners guard on `nativePlayer === player`: a player that
+        // has been disposed by a newer play() call must not clobber the new
+        // player's state with its final STOPPED status or last progress tick.
         player.statusProperty().addListener { _, _, status ->
-            // TEMP DEBUG (will be removed): prove native playback starts.
-            System.err.println("[NATIVE] status=$status stream=${streamUrl.take(60)}")
+            if (nativePlayer !== player) return@addListener
             when (status) {
                 MediaPlayer.Status.PLAYING -> {
+                    startedPlaying = true
                     MediaPlayerState.playing = true
                     touch()
                 }
@@ -355,6 +394,7 @@ object MediaPlayerController {
             }
         }
         player.currentTimeProperty().addListener { _, _, current ->
+            if (nativePlayer !== player) return@addListener
             val total = player.totalDuration
             if (total != null && !total.isUnknown() && total.toSeconds() > 0) {
                 MediaPlayerState.fraction =
@@ -363,6 +403,7 @@ object MediaPlayerController {
             touch()
         }
         player.setOnEndOfMedia {
+            if (nativePlayer !== player) return@setOnEndOfMedia
             MediaPlayerState.playing = false
             MediaPlayerState.fraction = 1f
             touch()
@@ -370,81 +411,68 @@ object MediaPlayerController {
         player.setOnError {
             System.err.println("[MEDIA-ERROR] ${player.error?.message}")
             MediaPlayerState.playing = false
-            touch()
+            // A stale error from a player that has since been replaced by
+            // a newer play() call — the error belongs to the old stream,
+            // so ignore it (do not feed the watchdog for the active one).
+            if (nativePlayer !== player) return@setOnError
+            // Playback failed AFTER starting (e.g. a transient network
+            // stall): keep the stop-and-hold behavior — don't yank the
+            // user to the browser mid-stream.
+            if (startedPlaying) {
+                touch()
+                return@setOnError
+            }
+            // Playback never started (missing codec / region lock / dead
+            // stream). Fall back to the default browser instead of leaving
+            // a dead black panel — the browser can usually play what
+            // JavaFX's bundled codecs cannot. Idempotent: fallbackToBrowser
+            // nulls currentToken, so a second error event does nothing.
+            val token = currentToken ?: return@setOnError
+            nativePlayer?.stop()
+            nativePlayer?.dispose()
+            nativePlayer = null
+            mediaView?.mediaPlayer = null
+            mediaView = null
+            currentRoot = null
+            fallbackToBrowser(token)
         }
 
-        if (existing != null) {
-            existing.title = MediaPlayerState.currentTitle ?: existing.title
-            if (isVideo) mediaView?.mediaPlayer = player
-            existing.show()
-            existing.toFront()
-            player.play()
-            return
-        }
-
-        val s = Stage()
-        nativeStage = s
-        s.title = MediaPlayerState.currentTitle ?: currentToken?.service?.label ?: "Media player"
-        s.isAlwaysOnTop = true
-        s.centerOnScreen()
-
-        if (isVideo) {
+        val root: Parent = if (isVideo) {
             val view = MediaView(player)
             mediaView = view
-            view.fitWidth = 520.0
-            view.fitHeight = 340.0
             // `preserveRatio` maps to a private field in javafx-media's
             // Kotlin view, so the explicit setter form is required.
             view.isPreserveRatio = true
+            view.fitWidth = 520.0
+            view.fitHeight = 340.0
             // MediaView is a leaf Node, not a Parent — it can't be the
             // scene root directly.
-            s.width = 520.0
-            s.height = 340.0
-            s.minWidth = 320.0
-            s.minHeight = 200.0
-            s.scene = Scene(StackPane(view).apply { style = "-fx-background-color: #000;" })
+            StackPane(view).apply {
+                alignment = Pos.CENTER
+                style = "-fx-background-color: #000;"
+            }
         } else {
-            // Audio has no picture — a small dark stage with the title.
-            val label = Label(
-                MediaPlayerState.currentTitle ?: currentToken?.service?.label ?: "Media player"
-            )
-            label.textFill = Color.WHITE
-            label.font = Font(15.0)
-            val root = StackPane(label)
-            root.alignment = Pos.CENTER
-            root.style = "-fx-background-color: #1a1a1a;"
-            s.width = 400.0
-            s.height = 90.0
-            s.scene = Scene(root)
+            // Audio has no picture — a dark pane keeps the host clean;
+            // the app shows a compact card with the title and controls.
+            StackPane().apply { style = "-fx-background-color: #1a1a1a;" }
         }
-
-        s.onCloseRequest = EventHandler { stop() }
-        s.show()
+        mount(root)
         player.play()
     }
 
-    /** Create the Spotify embed window on first use; reload on reuse. */
-    private fun ensureEmbedStage(embedUrl: String) {
-        val existing = embedStage
-        if (existing != null) {
-            existing.title = MediaPlayerState.currentTitle ?: existing.title
-            webEngine?.loadContent(spotifyEmbedHtml(embedUrl), "text/html")
-            existing.show()
-            existing.toFront()
-            return
-        }
-
-        val s = Stage()
-        embedStage = s
-        s.title = MediaPlayerState.currentTitle ?: currentToken?.service?.label ?: "Media player"
-        s.isAlwaysOnTop = true
-        s.width = 520.0
-        s.height = 340.0
-        s.minWidth = 320.0
-        s.minHeight = 200.0
-        s.centerOnScreen()
+    /** Build the Spotify embed [WebView] content and mount it on the host. */
+    private fun ensureEmbedContent(embedUrl: String) {
+        // Release the previous native playback / embed content.
+        nativePlayer?.stop()
+        nativePlayer?.dispose()
+        nativePlayer = null
+        mediaView?.mediaPlayer = null
+        mediaView = null
+        webEngine?.load(null)
+        webView = null
 
         val web = WebView()
+        webView = web
         val engine = web.engine
         webEngine = engine
 
@@ -467,11 +495,32 @@ object MediaPlayerController {
             }
         }
 
-        s.scene = Scene(web)
-        s.onCloseRequest = EventHandler { stop() }
-        s.show()
+        mount(web)
         engine.loadContent(spotifyEmbedHtml(embedUrl), "text/html")
     }
+
+    /** Set [root] as the host panel's scene content. No-op without a host
+     *  — attachHost pushes it once the panel composes. FX thread only. */
+    private fun mount(root: Parent) {
+        currentRoot = root
+        val panel = hostPanel ?: return
+        runCatching {
+            val (w, h) = sceneSize(panel)
+            panel.scene = Scene(root, w, h)
+        }
+    }
+
+    /** Scene size for the host panel. Falls back to the design size before
+     *  the panel has been laid out (width/height are 0 at creation) — a
+     *  0×0 scene would clip the media; JFXPanel resizes the scene to the
+     *  panel once it is laid out. FX thread only. */
+    private fun sceneSize(panel: JFXPanel): Pair<Double, Double> =
+        if (panel.width > 0 && panel.height > 0) {
+            panel.width.toDouble() to panel.height.toDouble()
+        } else {
+            // Matches the EmbeddedPlayer panel's requested dp size.
+            480.0 to 270.0
+        }
 
     private fun fallbackToBrowser(token: MediaReferenceToken) {
         currentToken = null
@@ -488,8 +537,8 @@ object MediaPlayerController {
 /**
  * The Spotify embed hosted in a full-bleed iframe. Spotify's embed has no
  * postMessage event protocol and no public command API, so the page is a
- * plain iframe — playback state for Spotify stays an indeterminate ring in
- * the UI, and pause/resume happen in the embed's own controls.
+ * plain iframe — playback state for Spotify stays an indeterminate state
+ * in the UI, and pause/resume happen in the embed's own controls.
  */
 private fun spotifyEmbedHtml(embedUrl: String): String = """
     <!DOCTYPE html>

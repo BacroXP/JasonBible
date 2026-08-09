@@ -68,6 +68,7 @@ import data.SettingsManager
 import data.SoundEvent
 import data.SoundManager
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 
 
 // True when a settings row/section should stay visible given the search
@@ -109,7 +110,7 @@ fun SettingsScreen(
     // it attach to the composition first).
     LaunchedEffect(searchOpen) {
         if (searchOpen) {
-            delay(50)
+            delay(50.milliseconds)
             searchFocusRequester.requestFocus()
         }
     }
@@ -677,12 +678,12 @@ fun SettingsScreen(
                             )
                         }
 
-                        if (prefsAll || languageRow || translationRow || currentRow) {
-                            Text(
-                                text = "Current: $selectedLanguage · $selectedTranslation",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
+                        // (showPrefs above already guarantees this section is
+                        // visible, so the row renders unconditionally.)
+                        Text(
+                            text = "Current: $selectedLanguage · $selectedTranslation",
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
 
                     Button(
@@ -1053,7 +1054,7 @@ private fun StepperButton(
         // Disabled buttons stay silent — no hover feedback for an action
         // the user can't take.
         if (isHovered && enabled) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -1094,8 +1095,7 @@ private fun StepperButton(
                                 currentOnClick()
                                 var interval = STEPPER_INITIAL_DELAY_MS
                                 while (true) {
-                                    delay(interval)
-                                    if (!currentEnabled) break
+                                    delay(interval.milliseconds)
                                     currentOnClick()
                                     interval = (interval * STEPPER_ACCEL)
                                         .toLong()

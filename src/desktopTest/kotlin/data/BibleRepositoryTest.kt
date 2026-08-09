@@ -95,7 +95,6 @@ class BibleRepositoryTest {
     fun cachedBooksReflectsLoadState() = runBlocking {
         // Pick a module no other test loads so this stays order-independent.
         SettingsManager.translation = "wo_wol_nt_2010"
-        val id = BibleRepository.currentModuleId()!!
         assertNull(BibleRepository.cachedBooks()) // not loaded yet
 
         val loaded = BibleRepository.loadBooks()

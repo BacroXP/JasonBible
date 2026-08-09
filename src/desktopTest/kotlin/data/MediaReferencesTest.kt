@@ -1,6 +1,6 @@
 package data
 
-import kotlinx.coroutines.runBlocking
+import runBlocking
 import testutil.TestEnv
 import java.nio.file.Files
 import java.nio.file.Path
@@ -290,7 +290,7 @@ class MediaReferencesTest {
         // Non-YouTube services short-circuit before any network call.
         assertEquals(
             null,
-            kotlinx.coroutines.runBlocking { fetchYouTubeDurationSeconds(vimeo) }
+            runBlocking { fetchYouTubeDurationSeconds(vimeo) }
         )
     }
 
@@ -526,9 +526,9 @@ class MediaReferencesTest {
     @Test
     fun profileFetchShortCircuitsForNonProfilesWithoutNetwork() {
         val video = findMediaReferenceTokens("@youtube:dQw4w9WgXcQ").single()
-        assertEquals(null, kotlinx.coroutines.runBlocking { fetchProfileInfo(video) })
+        assertEquals(null, runBlocking { fetchProfileInfo(video) })
         val track = findMediaReferenceTokens("@spotify:track:4cOdonKdQq7vF2eXyQfPqA").single()
-        assertEquals(null, kotlinx.coroutines.runBlocking { fetchProfileInfo(track) })
+        assertEquals(null, runBlocking { fetchProfileInfo(track) })
     }
 
     @Test
@@ -699,7 +699,7 @@ class MediaReferencesTest {
             // any network call and the null is cached so the editor's
             // per-keystroke re-filter never re-fetches.
             val link = findMediaReferenceTokens("@url:https://example.com/post/123").single()
-            assertEquals(null, kotlinx.coroutines.runBlocking { fetchMediaTitle(link) })
+            assertEquals(null, runBlocking { fetchMediaTitle(link) })
             assertTrue(MediaTitleCache.isCached(link.resolveUrl()!!))
         } finally {
             MediaTitleCache.clearForTests()
@@ -715,7 +715,7 @@ class MediaReferencesTest {
             // File name is the label (files carry no metadata title).
             assertEquals(
                 "photo-abc123.png",
-                kotlinx.coroutines.runBlocking { fetchMediaTitle(token) }
+                runBlocking { fetchMediaTitle(token) }
             )
         } finally {
             MediaTitleCache.clearForTests()
@@ -735,7 +735,7 @@ class MediaReferencesTest {
             MediaTitleCache.put(url, "Never Gonna Give You Up")
             assertEquals(
                 "Never Gonna Give You Up",
-                kotlinx.coroutines.runBlocking { fetchMediaTitle(token) }
+                runBlocking { fetchMediaTitle(token) }
             )
         } finally {
             MediaTitleCache.clearForTests()

@@ -1,10 +1,12 @@
 package ui
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlin.time.Duration.Companion.milliseconds
 import model.Book
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,6 +23,7 @@ import kotlin.test.assertTrue
  * window elapses, and a cancelled wait (exactly what LaunchedEffect
  * re-keying does on every keystroke) never reaches the scan.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class DebouncedSearchTest {
 
     private val book = Book(1, "Genesis", emptyList())
@@ -57,11 +60,11 @@ class DebouncedSearchTest {
             }
         }
         // Just before the window elapses the scan must not have run.
-        advanceTimeBy(199)
+        advanceTimeBy(199.milliseconds)
         runCurrent()
         assertFalse(ran, "scan must not run before the debounce window elapses")
         // Crossing the 200 ms mark fires the scan.
-        advanceTimeBy(1)
+        advanceTimeBy(1.milliseconds)
         runCurrent()
         assertTrue(ran, "scan must run once the debounce window has elapsed")
         job.join()
@@ -80,9 +83,9 @@ class DebouncedSearchTest {
                 emptyList()
             }
         }
-        advanceTimeBy(50)
+        advanceTimeBy(50.milliseconds)
         job.cancel() // keystroke arrives mid-window
-        advanceTimeBy(500)
+        advanceTimeBy(500.milliseconds)
         runCurrent()
         assertEquals(0, scanCalls, "a cancelled debounce must not run the scan")
     }

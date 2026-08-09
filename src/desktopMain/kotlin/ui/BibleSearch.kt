@@ -63,6 +63,7 @@ import data.SoundEvent
 import data.SoundManager
 import data.findMatchIn
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 import model.Book
 
 
@@ -176,7 +177,7 @@ internal suspend fun debouncedSearch(
 ): List<BibleSearchMatch> {
     val trimmed = query.trim()
     if (trimmed.isEmpty()) return emptyList()
-    delay(debounceMillis)
+    delay(debounceMillis.milliseconds)
     return scan(trimmed)
 }
 
@@ -451,7 +452,7 @@ internal fun BibleSearchResults(
     // active row visible — same cue as the editor's find bar.
     LaunchedEffect(activeIndex) {
         if (activeIndex >= 0) {
-            delay(50)
+            delay(50.milliseconds)
             rowYs[activeIndex]?.let { y ->
                 scrollState.animateScrollTo((y - 24).coerceAtLeast(0))
             }
@@ -646,7 +647,7 @@ private fun BibleSearchMatchRow(
     val isHovered by hoverSource.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -944,9 +945,9 @@ private fun SearchScopeDropdown(
                         Text(
                             text = option.menuLabel,
                             fontWeight = if (option == scope) {
-                                androidx.compose.ui.text.font.FontWeight.Bold
+                                FontWeight.Bold
                             } else {
-                                androidx.compose.ui.text.font.FontWeight.Normal
+                                FontWeight.Normal
                             },
                             color = if (option == scope) {
                                 MaterialTheme.colorScheme.primary

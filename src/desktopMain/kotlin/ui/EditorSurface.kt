@@ -13,7 +13,6 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -28,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropTarget
@@ -48,10 +48,9 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
@@ -62,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import data.SoundEvent
 import data.SoundManager
 import data.openExternalUrl
+import kotlinx.coroutines.launch
 
 
 // Right-click context-menu state: the reference under the cursor plus the
@@ -152,7 +152,9 @@ internal fun EditorSurface(
     var referenceMenu by remember { mutableStateOf<ReferenceMenuState?>(null) }
     // Editing the text invalidates any open menu's reference — close it.
     LaunchedEffect(value.text) { referenceMenu = null }
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    // Clipboard writes are async (suspend) in the new Compose API.
+    val clipboardScope = rememberCoroutineScope()
     // Hoisted out of the pointer-input scope below (LocalDensity.current
     // is a @Composable call, illegal inside the suspend lambda) and used
     // to convert the px press position to the DpOffset the DropdownMenu
@@ -451,7 +453,9 @@ internal fun EditorSurface(
                                 text = { Text("Copy reference") },
                                 onClick = {
                                     SoundManager.play(SoundEvent.Click)
-                                    clipboard.setText(AnnotatedString(hit.match.displayText()))
+                                    clipboardScope.launch {
+                                        clipboard.setClipEntry(plainTextClipEntry(hit.match.displayText()))
+                                    }
                                     referenceMenu = null
                                 }
                             )
@@ -469,9 +473,9 @@ internal fun EditorSurface(
                                 text = { Text("Copy link") },
                                 onClick = {
                                     SoundManager.play(SoundEvent.Click)
-                                    clipboard.setText(
-                                        AnnotatedString(hit.token.resolveUrl().orEmpty())
-                                    )
+                                    clipboardScope.launch {
+                                        clipboard.setClipEntry(plainTextClipEntry(hit.token.resolveUrl().orEmpty()))
+                                    }
                                     referenceMenu = null
                                 }
                             )
@@ -489,7 +493,9 @@ internal fun EditorSurface(
                                 text = { Text("Copy title") },
                                 onClick = {
                                     SoundManager.play(SoundEvent.Click)
-                                    clipboard.setText(AnnotatedString(hit.title))
+                                    clipboardScope.launch {
+                                    clipboard.setClipEntry(plainTextClipEntry(hit.title))
+                                }
                                     referenceMenu = null
                                 }
                             )

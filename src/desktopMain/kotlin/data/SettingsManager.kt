@@ -613,74 +613,6 @@ object SettingsManager {
             }
         }
 
-    // ------------------------------------------------------------------
-    // Custom reading plans
-    // ------------------------------------------------------------------
-
-    val customPlans: List<CustomPlan>
-        get() = customPlansState.value
-
-    fun customPlan(id: String): CustomPlan? =
-        customPlansState.value.find { it.id == id }
-
-    fun saveCustomPlan(plan: CustomPlan) {
-        val updated = customPlansState.value.toMutableList().apply {
-            val index = indexOfFirst { it.id == plan.id }
-            if (index >= 0) this[index] = plan else add(plan)
-        }
-        customPlansState.value = updated
-        save()
-    }
-
-    fun deleteCustomPlan(id: String) {
-        customPlansState.value = customPlansState.value.filterNot { it.id == id }
-        save()
-    }
-
-    // ------------------------------------------------------------------
-    // Reading reminder (local, no cloud)
-    // ------------------------------------------------------------------
-
-    var reminderEnabled: Boolean
-        get() = reminderEnabledState.value
-        set(value) {
-            if (reminderEnabledState.value != value) {
-                reminderEnabledState.value = value
-                save()
-            }
-        }
-
-    /** Reminder time as minutes after midnight (0..1439). */
-    var reminderTimeMinutes: Int
-        get() = reminderTimeMinutesState.value
-        set(value) {
-            val clamped = value.coerceIn(0, 1439)
-            if (reminderTimeMinutesState.value != clamped) {
-                reminderTimeMinutesState.value = clamped
-                save()
-            }
-        }
-
-    /** Plan id the reminder belongs to (null = the daily 365-day plan). */
-    var reminderPlanId: String?
-        get() = reminderPlanIdState.value
-        set(value) {
-            if (reminderPlanIdState.value != value) {
-                reminderPlanIdState.value = value
-                save()
-            }
-        }
-
-    /** ISO date the reminder was last shown ("" = never). */
-    var lastReminderShown: String
-        get() = lastReminderShownState.value
-        set(value) {
-            if (lastReminderShownState.value != value) {
-                lastReminderShownState.value = value
-                save()
-            }
-        }
-
     init {
         load()
     }
@@ -744,24 +676,6 @@ object SettingsManager {
     }
 
 
-    fun toggleChapterRead(bookNumber: Int, chapterNumber: Int) {
-        val key = chapterKey(bookNumber, chapterNumber)
-        val mutable = readChaptersState.value.toMutableSet()
-        // add returns true when the key was NOT present → now read.
-        val nowRead = mutable.add(key)
-        if (!nowRead) mutable.remove(key)
-        readChaptersState.value = mutable.toSet()
-        readHistoryState.value = readHistoryState.value.toMutableMap().apply {
-            if (nowRead) {
-                put(key, LocalDate.now().toString())
-            } else {
-                remove(key)
-            }
-        }
-        save()
-    }
-
-
     fun readChapterCount(): Int {
         return readChaptersState.value.size
     }
@@ -781,18 +695,6 @@ object SettingsManager {
                 chapter = key.substringAfter(':').toIntOrNull() ?: 0
             )
         }.sortedWith(compareBy({ it.date }, { it.book }, { it.chapter }))
-
-
-    fun readChaptersInRange(bookNumbers: Set<Int>): Int {
-        return readChaptersState.value.count { key ->
-            key.substringBefore(":").toIntOrNull() in bookNumbers
-        }
-    }
-
-
-    fun getVerseTags(bookNumber: Int, chapterNumber: Int, verseNumber: Int): List<String> {
-        return verseMarker(bookNumber, chapterNumber, verseNumber)?.tags.orEmpty()
-    }
 
 
     fun getVerseMarkerColor(
@@ -816,18 +718,6 @@ object SettingsManager {
     }
 
 
-    fun setVerseTags(
-        bookNumber: Int,
-        chapterNumber: Int,
-        verseNumber: Int,
-        tags: List<String>
-    ) {
-        upsertVerseMarker(bookNumber, chapterNumber, verseNumber) { current ->
-            current.copy(tags = tags)
-        }
-    }
-
-
     fun getLastRead(): LastReadRef? {
         return lastReadState.value
     }
@@ -837,14 +727,6 @@ object SettingsManager {
         val next = LastReadRef(bookNumber, chapterNumber, verseNumber)
         if (lastReadState.value != next) {
             lastReadState.value = next
-            save()
-        }
-    }
-
-
-    fun clearLastRead() {
-        if (lastReadState.value != null) {
-            lastReadState.value = null
             save()
         }
     }

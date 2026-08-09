@@ -196,7 +196,7 @@ internal data class ReferenceMatch(
 }
 
 
-internal data class ReferenceLookup(
+internal class ReferenceLookup(
     val lineStarts: IntArray,
     val byLine: Map<Int, ReferenceMatch>,
     /**

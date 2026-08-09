@@ -75,7 +75,7 @@ object BibleRepository {
                 // failure) so the next cold access re-parses; the cached
                 // result is what later callers actually read.
                 created.invokeOnCompletion {
-                    synchronized(inFlight) { inFlight.remove(moduleId) }
+                    synchronized(inFlight) { inFlight -= moduleId }
                 }
                 inFlight[moduleId] = created
             }
@@ -182,9 +182,6 @@ object BibleRepository {
         return books().find { it.book == number }
     }
 
-    fun getChapter(bookName: String, chapterNumber: Int): Chapter? {
-        return getBook(bookName)?.chapters?.find { chapter -> chapter.chapter == chapterNumber }
-    }
 
     /**
      * Canonical book number for a name in any known language, or null.

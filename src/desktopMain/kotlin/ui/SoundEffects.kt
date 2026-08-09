@@ -14,6 +14,7 @@ import androidx.compose.ui.composed
 import data.SoundEvent
 import data.SoundManager
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 
 
 /**
@@ -72,7 +73,7 @@ fun rememberSoundHover(): Modifier = Modifier.composed {
             // Debounce: if the cursor leaves again within 60 ms we cancel
             // the sound via LaunchedEffect re-keying. This keeps rapid
             // edge crossings from spamming the audio mixer.
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -92,7 +93,7 @@ fun Modifier.soundHoverOn(source: MutableInteractionSource): Modifier {
     val isHovered by source.collectIsHoveredAsState()
     LaunchedEffect(source, isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -119,7 +120,7 @@ fun PlayOpenCloseSound(visible: Boolean) {
     var last by remember { mutableStateOf(visible) }
     LaunchedEffect(visible) {
         if (visible == last) return@LaunchedEffect
-        delay(80)
+        delay(80.milliseconds)
         if (visible == last) return@LaunchedEffect
         SoundManager.play(if (visible) SoundEvent.Open else SoundEvent.Close)
         last = visible

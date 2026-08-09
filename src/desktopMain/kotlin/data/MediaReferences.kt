@@ -7,7 +7,6 @@ import kotlinx.serialization.json.Json
 import java.awt.Desktop
 import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.LinkedHashMap
@@ -126,7 +125,7 @@ data class MediaReferenceToken(
      * source range, so tap/hover still resolve).
      */
     fun chipText(): String {
-        val url = resolveUrl() ?: return ""
+        if (resolveUrl() == null) return ""
         val base = service.label
         val tokenLen = sourceEnd - sourceStart
         val extra = when {
@@ -463,7 +462,7 @@ object MediaPreviewFetcher {
         val endpoint = token.service.oEmbedUrl(url) ?: return null
         return withContext(Dispatchers.IO) {
             val info = runCatching {
-                val conn = URL(endpoint).openConnection() as HttpURLConnection
+                val conn = URI(endpoint).toURL().openConnection() as HttpURLConnection
                 conn.connectTimeout = HTTP_TIMEOUT_MILLIS
                 conn.readTimeout = HTTP_TIMEOUT_MILLIS
                 conn.setRequestProperty("User-Agent", APP_USER_AGENT)
@@ -522,7 +521,7 @@ suspend fun fetchYouTubeDurationSeconds(token: MediaReferenceToken): Long? {
     val url = token.resolveUrl() ?: return null
     return withContext(Dispatchers.IO) {
         runCatching {
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = URI(url).toURL().openConnection() as HttpURLConnection
             conn.connectTimeout = HTTP_TIMEOUT_MILLIS
             conn.readTimeout = HTTP_TIMEOUT_MILLIS
             conn.setRequestProperty("User-Agent", APP_USER_AGENT)
@@ -636,7 +635,7 @@ private suspend fun scrapeSpotifyTrackArtists(url: String): String? {
     if (SpotifyArtistCache.isCached(url)) return SpotifyArtistCache.get(url)
     val fetched = withContext(Dispatchers.IO) {
         runCatching {
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = URI(url).toURL().openConnection() as HttpURLConnection
             conn.connectTimeout = HTTP_TIMEOUT_MILLIS
             conn.readTimeout = HTTP_TIMEOUT_MILLIS
             conn.setRequestProperty("User-Agent", APP_USER_AGENT)
@@ -971,7 +970,7 @@ suspend fun fetchProfileInfo(token: MediaReferenceToken): MediaProfileInfo? {
     if (ProfileInfoCache.isCached(url)) return ProfileInfoCache.get(url)
     val fetched = withContext(Dispatchers.IO) {
         runCatching {
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = URI(url).toURL().openConnection() as HttpURLConnection
             conn.connectTimeout = HTTP_TIMEOUT_MILLIS
             conn.readTimeout = HTTP_TIMEOUT_MILLIS
             conn.setRequestProperty("User-Agent", APP_USER_AGENT)

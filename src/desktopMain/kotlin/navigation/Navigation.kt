@@ -21,7 +21,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.key
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import data.NotesRepository
@@ -579,13 +578,14 @@ fun Navigation(
                 )
             }
 
-            // Mini player: pinned bottom-right, appears whenever the in-app
-            // media player has something loaded and SURVIVES screen changes
-            // (going back / opening another note keeps the clip playing —
-            // the always-on-top player window keeps running and this card
-            // provides pause / resume / close from any screen). Clicking
-            // the card re-opens the player window.
-            MiniPlayer(
+            // Embedded player: pinned bottom-right, appears whenever the
+            // in-app player has something loaded and SURVIVES screen
+            // changes (going back / opening another note keeps the clip
+            // playing). Playback happens INSIDE this window — video / the
+            // Spotify widget render on a JFXPanel bridged in via
+            // SwingPanel, audio shows a compact card — and the panel
+            // provides pause / resume / close from any screen.
+            EmbeddedPlayer(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)

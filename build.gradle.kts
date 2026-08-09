@@ -28,8 +28,13 @@ kotlin {
             // The per-OS classifier jars carry the native libraries, so
             // every installer bundles exactly its own platform's binaries;
             // the classifier is derived from the BUILD host's OS. Version
-            // 25 matches the JDK 25 runtime this project targets.
-            val javafxVersion = "25.0.2"
+            // 26 is required on modern Linux distros (ffmpeg 8.0 ships
+            // libavcodec 62): JavaFX 25.x only bundles codec plugins up to
+            // libavcodec 61, so on such systems native playback fails with
+            // "ERROR_MEDIA_AUDIO_FORMAT_UNSUPPORTED" and only WAV plays.
+            // JavaFX 26.0.2 adds the libavcodec-62 plugin and runs on the
+            // JDK 25 runtime this project targets.
+            val javafxVersion = "26.0.2"
             val fxClassifier = when {
                 System.getProperty("os.name").lowercase().contains("mac") -> "mac"
                 System.getProperty("os.name").lowercase().contains("win") -> "win"
@@ -56,6 +61,13 @@ kotlin {
                 implementation("org.openjfx:javafx-media:$javafxVersion:$fxClassifier")
                 implementation("org.openjfx:javafx-web:$javafxVersion")
                 implementation("org.openjfx:javafx-web:$javafxVersion:$fxClassifier")
+                // JavaFX↔Swing bridge: hosts the in-app media player (the
+                // native MediaView for video services and the WebView for
+                // Spotify's embed) inside the main Compose window via a
+                // JFXPanel wrapped in Compose's SwingPanel — so playback
+                // happens IN the app instead of a separate OS window.
+                implementation("org.openjfx:javafx-swing:$javafxVersion")
+                implementation("org.openjfx:javafx-swing:$javafxVersion:$fxClassifier")
 
                 // JSON
                 implementation(
@@ -121,7 +133,14 @@ compose.desktop {
                 "java.security.jgss",
                 "java.sql",
                 "jdk.jsobject",
-                "jdk.unsupported"
+                "jdk.unsupported",
+                // JFXPanel (javafx.swing — the SwingPanel bridge that hosts
+                // the in-app media player) needs the Swing-interop classes;
+                // since JDK 22 these ship in jdk.unsupported.desktop (the
+                // old jdk.swing.interop module no longer exists). Without it
+                // the packaged app spams NoClassDefFoundError:
+                // jdk.swing.interop.SwingInterOpUtils on the FX thread.
+                "jdk.unsupported.desktop"
             )
 
             targetFormats(

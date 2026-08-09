@@ -557,7 +557,7 @@ object NotesRepository {
     private fun findNoteLinks(line: String): List<String> =
         NOTE_LINK_REGEX.findAll(line).map { it.groupValues[1].trim() }.toList()
 
-    private val NOTE_LINK_REGEX = Regex("\\[\\[([^\\]]+)\\]\\]")
+    private val NOTE_LINK_REGEX = Regex("\\[\\[([^]]+)]]")
 
 
     private fun parseReferenceLine(
@@ -684,10 +684,6 @@ object NotesRepository {
                 .toList()
         }
     }
-
-    /** Notes directly inside [folder] ("" = the root). */
-    fun notesInFolder(folder: String): List<ParsedNote> =
-        listFiles().filter { it.folder == folder }
 
     /**
      * A folder path is valid when it stays inside the notes root: no

@@ -240,7 +240,6 @@ class QuoteAutocompleteTest {
 
     @Test
     fun chainAfterRangeSuggestsNextAfterRangeEnd() {
-        val text = "\"verse\"[#3B82F6] \$John&3&16-17 "
         // The inner text must end with the last cited verse; build a real
         // one so the verification passes.
         val v16 = cleanVerseText(john.chapters[0].verses[0])

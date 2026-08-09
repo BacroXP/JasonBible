@@ -61,9 +61,6 @@ object StreamResolver {
         cache[url] = stream
     }
 
-    @Synchronized
-    internal fun clearForTests() = cache.clear()
-
     /**
      * Direct playable stream URL for a media token, or null when the
      * token isn't streamable (generic links / profiles), yt-dlp is

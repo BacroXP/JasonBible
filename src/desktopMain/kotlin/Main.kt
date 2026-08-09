@@ -8,7 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.rememberWindowState
@@ -20,6 +19,7 @@ import data.SoundManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 import navigation.Navigation
 import ui.SplashScreen
 
@@ -73,7 +73,7 @@ fun main() = application {
         // installer icons are generated from it); on macOS the Dock icon is
         // set via `iconFile` in build.gradle.kts instead (per-window icons
         // are not supported there).
-        icon = painterResource("icons/Icon.png"),
+        icon = ui.rememberClasspathPainter("icons/Icon.png"),
         onPreviewKeyEvent = { event -> windowKeyHandler(event) }
     ) {
 
@@ -84,7 +84,7 @@ fun main() = application {
         // the window has actually been mapped so it lands maximized.
         LaunchedEffect(Unit) {
             if (SettingsManager.fullScreen) {
-                delay(200)
+                delay(200.milliseconds)
                 windowState.placement = WindowPlacement.Maximized
             }
         }
@@ -133,7 +133,7 @@ fun main() = application {
                     }
                     val elapsed = System.currentTimeMillis() - startedAt
                     if (elapsed < MIN_SPLASH_MILLIS) {
-                        delay(MIN_SPLASH_MILLIS - elapsed)
+                        delay((MIN_SPLASH_MILLIS - elapsed).milliseconds)
                     }
                     appReady = true
                     // Boot chime, timed with the splash → main-UI handoff.
@@ -165,11 +165,11 @@ fun main() = application {
                         val content = piece.substringAfter(':', "").ifBlank { return@mapNotNull null }
                         data.MediaReferenceToken(service, content, 0, 0)
                     }
-                    delay(1500)
+                    delay(1500.milliseconds)
                     tokens.forEachIndexed { index, token ->
                         System.err.println("[DEBUG-AUTOPLAY] playing #$index ${token.service} ${token.content}")
                         ui.MediaPlayerController.play(token, "Debug autoplay #$index")
-                        delay(15000)
+                        delay(15000.milliseconds)
                     }
                 }
 

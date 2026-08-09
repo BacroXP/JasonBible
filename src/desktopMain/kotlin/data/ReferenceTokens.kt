@@ -88,7 +88,7 @@ internal fun parseRange(
     if (raw.startsWith("-")) {
         var body = raw.drop(1)
         var ec = sc
-        var ev = sv
+        var ev: Int
         if (body.isNotEmpty() && (body[0] == '&' || body[0] == '$')) {
             // Cross-chapter end: `-&C2[&V2][+N]`. Missing end verse
             // means verse 1 of the target chapter.
@@ -354,7 +354,7 @@ data class NoteLinkToken(
 )
 
 
-private val NOTE_LINK_TOKEN_REGEX = Regex("\\[\\[([^\\]]+)\\]\\]")
+private val NOTE_LINK_TOKEN_REGEX = Regex("\\[\\[([^]]+)]]")
 
 
 /**

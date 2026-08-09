@@ -50,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,7 +68,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -79,13 +80,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import data.BibleRepository
+import data.MediaFileKind
 import data.MediaReferenceToken
 import data.MediaSearchKind
 import data.MediaSearchResult
+import data.MediaService
 import data.MediaTitleCache
 import data.NotesRepository
 import data.SettingsManager
@@ -93,11 +95,16 @@ import data.SoundEvent
 import data.SoundManager
 import data.fetchMediaTitle
 import data.findMediaReferenceTokens
+import data.isPlayable
+import data.isProfile
+import data.mediaKindFor
 import data.openExternalUrl
 import data.searchYouTube
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.math.roundToInt
 import model.Book
 import model.ParsedNote
@@ -308,7 +315,7 @@ fun NotesScreen(
     // the transformation so the editor re-filters with the new titles.
     LaunchedEffect(selectedNote?.fileName, editorValue.text) {
         if (editorValue.text.isEmpty()) return@LaunchedEffect
-        delay(200)
+        delay(200.milliseconds)
         val tokens = findMediaReferenceTokens(editorValue.text)
         if (tokens.isEmpty()) return@LaunchedEffect
         var newTitles = false
@@ -339,7 +346,7 @@ fun NotesScreen(
 
     LaunchedEffect(saveBanner) {
         if (saveBanner != null) {
-            delay(2500)
+            delay(2500.milliseconds)
             saveBanner = null
         }
     }
@@ -380,7 +387,7 @@ fun NotesScreen(
             notesSearchResults = emptyList()
             return@LaunchedEffect
         }
-        delay(200)
+        delay(200.milliseconds)
         // Re-read the query after the debounce so the effect re-keying
         // can't land a stale scan on a newer query.
         val live = notesSearchQuery.trim()
@@ -439,7 +446,10 @@ fun NotesScreen(
 
     // Word-style Clipboard group (Cut / Copy / Paste). Reads & writes the
     // OS clipboard so text can travel between the editor and other apps.
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    // Clipboard writes are async (suspend) in the new Compose API; all
+    // copy/paste actions launch on this scope.
+    val clipboardScope = rememberCoroutineScope()
 
     // Word-style font-size zoom (A− / A+). A pure VIEW setting: it scales
     // the editor's rendered text but never touches the saved .note content.
@@ -670,7 +680,9 @@ fun NotesScreen(
         if (sel.collapsed) return
         val min = minOf(sel.start, sel.end)
         val max = maxOf(sel.start, sel.end)
-        clipboard.setText(AnnotatedString(editorValue.text.substring(min, max)))
+        clipboardScope.launch {
+            clipboard.setClipEntry(plainTextClipEntry(editorValue.text.substring(min, max)))
+        }
     }
 
     fun cutSelection() {
@@ -678,16 +690,20 @@ fun NotesScreen(
         if (sel.collapsed) return
         val min = minOf(sel.start, sel.end)
         val max = maxOf(sel.start, sel.end)
-        clipboard.setText(AnnotatedString(editorValue.text.substring(min, max)))
+        clipboardScope.launch {
+            clipboard.setClipEntry(plainTextClipEntry(editorValue.text.substring(min, max)))
+        }
         applyEditorChange(
             editorValue.copy(text = editorValue.text.removeRange(min, max), selection = TextRange(min))
         )
     }
 
     fun pasteClipboard() {
-        val text = clipboard.getText()?.text
-        if (!text.isNullOrEmpty()) {
-            applyEditorChange(insertAtSelection(editorValue, text))
+        clipboardScope.launch {
+            val text = clipboard.getClipEntry()?.readPlainText()
+            if (!text.isNullOrEmpty()) {
+                applyEditorChange(insertAtSelection(editorValue, text))
+            }
         }
     }
 
@@ -850,7 +866,7 @@ fun NotesScreen(
         if (chainSuggestion != null || citePrefix == null || suggestBooks.isEmpty()) {
             return@LaunchedEffect
         }
-        delay(120)
+        delay(120.milliseconds)
         val prefix = citePrefix
         citeFresh = withContext(Dispatchers.Default) {
             findFreshCite(suggestBooks, prefix.text)?.let { prefix to it }
@@ -921,7 +937,7 @@ fun NotesScreen(
     LaunchedEffect(mediaPrefix) {
         mediaSearchResult = null
         val prefix = mediaPrefix ?: return@LaunchedEffect
-        delay(250)
+        delay(250.milliseconds)
         val results = withContext(Dispatchers.IO) {
             searchYouTube(prefix.query)
         }
@@ -1086,7 +1102,7 @@ fun NotesScreen(
     LaunchedEffect(Unit) {
         var lastSignatures = NotesRepository.fileSignatures()
         while (true) {
-            delay(NOTES_POLL_INTERVAL_MS)
+            delay(NOTES_POLL_INTERVAL_MS.milliseconds)
             val current = NotesRepository.fileSignatures()
             if (current != lastSignatures) {
                 lastSignatures = current
@@ -1590,8 +1606,40 @@ fun NotesScreen(
                                             )
                                         }
                                     }
-                                    is ReferenceHit.Media -> mediaPreview =
-                                        MediaPreviewState(hit.token, anchor)
+                                    is ReferenceHit.Media -> {
+                                        val token = hit.token
+                                        // Playable items (videos / songs /
+                                        // local audio & video) start in-app
+                                        // playback IMMEDIATELY — no popup
+                                        // detour, the embedded player opens
+                                        // bottom-right and plays. Profiles,
+                                        // plain links and embedded images
+                                        // keep the preview popup (which
+                                        // offers "Open in browser").
+                                        val playable = token.service.isPlayable &&
+                                            !token.isProfile &&
+                                            // Local files play only when they
+                                            // are actual video / audio; images
+                                            // and unknown extensions keep the
+                                            // preview popup.
+                                            (token.service != MediaService.FILE ||
+                                                mediaKindFor(token.content) in
+                                                setOf(
+                                                    MediaFileKind.VIDEO,
+                                                    MediaFileKind.AUDIO
+                                                ))
+                                        if (playable) {
+                                            SoundManager.play(SoundEvent.Click)
+                                            MediaPlayerController.play(
+                                                token,
+                                                token.resolveUrl()?.let {
+                                                    MediaTitleCache.get(it)
+                                                }
+                                            )
+                                        } else {
+                                            mediaPreview = MediaPreviewState(token, anchor)
+                                        }
+                                    }
                                     is ReferenceHit.Note -> {
                                         // `[[Title]]` note link: switch the
                                         // editor to the linked note. The
@@ -2022,9 +2070,9 @@ fun NotesScreen(
                         },
                         onCopy = {
                             SoundManager.play(SoundEvent.Click)
-                            clipboard.setText(
-                                AnnotatedString(preview.token.resolveUrl().orEmpty())
-                            )
+                            clipboardScope.launch {
+                                clipboard.setClipEntry(plainTextClipEntry(preview.token.resolveUrl().orEmpty()))
+                            }
                             mediaPreview = null
                         },
                         // The popup is focusable (takes focus from the main
@@ -2221,7 +2269,7 @@ private fun NotesSearchResults(
     val isHovered by hoverSource.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
@@ -2476,7 +2524,7 @@ private fun CitationSuggestionBar(
     val isHovered by hoverSource.collectIsHoveredAsState()
     LaunchedEffect(isHovered) {
         if (isHovered) {
-            delay(60)
+            delay(60.milliseconds)
             SoundManager.play(SoundEvent.Hover)
         }
     }
