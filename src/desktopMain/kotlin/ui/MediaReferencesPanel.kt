@@ -1312,6 +1312,30 @@ internal fun LoopButton(
 }
 
 
+/** Round button with an ↗ open-in-new glyph — opens the current media's
+ *  own service page (e.g. the YouTube watch page) in the default browser.
+ *  Shared by the embedded player and the playing media cards. */
+@Composable
+internal fun OpenExternalButton(onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.62f))
+            .clickable(onClick = onOpen)
+    ) {
+        Icon(
+            imageVector = RibbonIcons.OpenExternal,
+            contentDescription = "Open in browser",
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(5.dp),
+            tint = Color.White
+        )
+    }
+}
+
+
 /** Small round ✕-style stop control in the corner of a playing card and
  *  the embedded player. */
 @Composable

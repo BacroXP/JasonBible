@@ -150,7 +150,7 @@ compose.desktop {
             )
 
             packageName = "BibleApp"
-            packageVersion = "2.0.0"
+            packageVersion = "2.0.1"
 
             // Application icons, one per platform. Kept in
             // src/desktopMain/resources/icons/ and referenced explicitly

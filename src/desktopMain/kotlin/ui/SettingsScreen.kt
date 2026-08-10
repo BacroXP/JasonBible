@@ -1,5 +1,10 @@
 package ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
@@ -20,16 +25,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -68,6 +72,7 @@ import data.SettingsManager
 import data.SoundEvent
 import data.SoundManager
 import kotlinx.coroutines.delay
+import ui.components.MaxWidthScaffold
 import kotlin.time.Duration.Companion.milliseconds
 
 
@@ -105,6 +110,21 @@ fun SettingsScreen(
     // instead of swallowing it to close the search bar.
     var languageMenuOpen by remember { mutableStateOf(false) }
     var translationMenuOpen by remember { mutableStateOf(false) }
+
+    // Fold state for each collapsible section, held in SettingsManager
+    // (session-scoped, in-memory only). Every section starts CLOSED on
+    // each app launch; once the user expands one it stays open for the
+    // rest of the session, so leaving and reopening Settings restores
+    // the user's layout. While a search is active every VISIBLE section
+    // is forced open (expanded), so matched rows are never hidden
+    // behind a fold.
+    val appearanceExpanded = SettingsManager.isSettingsSectionExpanded("appearance")
+    val layoutExpanded = SettingsManager.isSettingsSectionExpanded("layout")
+    val soundExpanded = SettingsManager.isSettingsSectionExpanded("sound")
+    val copyExpanded = SettingsManager.isSettingsSectionExpanded("copy")
+    val searchSectionExpanded = SettingsManager.isSettingsSectionExpanded("search")
+    val prefsExpanded = SettingsManager.isSettingsSectionExpanded("prefs")
+    val searching = searchQuery.isNotBlank()
 
     // Focus the search field as soon as it appears (the short delay lets
     // it attach to the composition first).
@@ -163,6 +183,17 @@ fun SettingsScreen(
                 searchOpen = true
             }
             true
+        }
+        // Esc with no dropdown / search bar open returns Home (mirroring
+        // the other full-screen screens).
+        else if (event.key == Key.Escape) {
+            if (languageMenuOpen || translationMenuOpen) {
+                false
+            } else {
+                SoundManager.play(SoundEvent.Click)
+                back()
+                true
+            }
         } else {
             false
         }
@@ -287,36 +318,88 @@ fun SettingsScreen(
     val nothingShown = searchQuery.isNotBlank() &&
         !(showAppearance || showLayout || showSound || showCopy || showSearch || showPrefs)
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
-            .onPreviewKeyEvent(settingsShortcutHandler),
-        contentAlignment = Alignment.Center
+            .onPreviewKeyEvent(settingsShortcutHandler)
     ) {
-        Card(
-            modifier = Modifier
-                .widthIn(max = 620.dp)
-                .fillMaxWidth()
+        // Compact top bar with the back button and the title, mirroring
+        // the other full-screen screens (Statistics, Collections, …).
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
+            // Icon back button: a tappable arrow with the app's hover /
+            // click sounds and a subtle hover tint (like the collapsible
+            // section headers) signaling it's interactive.
+            val backHover = remember { MutableInteractionSource() }
+            val isBackHovered by backHover.collectIsHoveredAsState()
+            LaunchedEffect(isBackHovered) {
+                if (isBackHovered) {
+                    delay(60.milliseconds)
+                    SoundManager.play(SoundEvent.Hover)
+                }
+            }
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 620.dp)
-                    .padding(24.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .verticalScroll(scrollState)
-                ) {
-                    Text(
-                        text = "Settings",
-                        style = MaterialTheme.typography.headlineMedium
+                    .padding(start = 8.dp)
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (isBackHovered) {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        } else {
+                            Color.Transparent
+                        }
                     )
+                    .hoverable(backHover)
+                    .clickable {
+                        SoundManager.play(SoundEvent.Click)
+                        back()
+                    }
+            ) {
+                Icon(
+                    imageVector = RibbonIcons.Back,
+                    contentDescription = "Back",
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            Icon(
+                imageVector = RibbonIcons.Settings,
+                contentDescription = null,
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+        )
 
+        // Full-height scrollable settings on a wider centered card.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            MaxWidthScaffold(compact = false, maxWidth = 760.dp) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                            .padding(20.dp)
+                    ) {
                     if (searchOpen) {
                         SettingsSearchBar(
                             query = searchQuery,
@@ -335,11 +418,18 @@ fun SettingsScreen(
                     }
 
                     if (showAppearance) {
-                        Text(
-                            text = "Appearance",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
+                        SettingsSection(
+                            title = "Appearance",
+                            expanded = appearanceExpanded || searching,
+                            onToggle = {
+                                if (!searching) {
+                                    SettingsManager.setSettingsSectionExpanded(
+                                        "appearance",
+                                        !appearanceExpanded
+                                    )
+                                }
+                            }
+                        ) {
                         if (appearanceAll || darkModeRow) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -401,14 +491,22 @@ fun SettingsScreen(
                         if (appearanceAll || colorStyleRow) {
                             ColorStyleSetting()
                         }
+                        }
                     }
 
                     if (showLayout) {
-                        Text(
-                            text = "Layout",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
+                        SettingsSection(
+                            title = "Layout",
+                            expanded = layoutExpanded || searching,
+                            onToggle = {
+                                if (!searching) {
+                                    SettingsManager.setSettingsSectionExpanded(
+                                        "layout",
+                                        !layoutExpanded
+                                    )
+                                }
+                            }
+                        ) {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -453,14 +551,22 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        }
                     }
 
                     if (showSound) {
-                        Text(
-                            text = "Sound",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
+                        SettingsSection(
+                            title = "Sound",
+                            expanded = soundExpanded || searching,
+                            onToggle = {
+                                if (!searching) {
+                                    SettingsManager.setSettingsSectionExpanded(
+                                        "sound",
+                                        !soundExpanded
+                                    )
+                                }
+                            }
+                        ) {
                         if (soundAll || soundEffectsRow) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -532,14 +638,22 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        }
                     }
 
                     if (showCopy) {
-                        Text(
-                            text = "Copy",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
+                        SettingsSection(
+                            title = "Copy",
+                            expanded = copyExpanded || searching,
+                            onToggle = {
+                                if (!searching) {
+                                    SettingsManager.setSettingsSectionExpanded(
+                                        "copy",
+                                        !copyExpanded
+                                    )
+                                }
+                            }
+                        ) {
                         if (copyAll || copyTranslationRow) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -565,14 +679,22 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        }
                     }
 
                     if (showSearch) {
-                        Text(
-                            text = "Search",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
+                        SettingsSection(
+                            title = "Search",
+                            expanded = searchSectionExpanded || searching,
+                            onToggle = {
+                                if (!searching) {
+                                    SettingsManager.setSettingsSectionExpanded(
+                                        "search",
+                                        !searchSectionExpanded
+                                    )
+                                }
+                            }
+                        ) {
                         // Promotion borders for the global search results:
                         // a book shown as a book once the term appears at
                         // least N times in it; below that, its matches drill
@@ -633,14 +755,22 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        }
                     }
 
                     if (showPrefs) {
-                        Text(
-                            text = "Bible preferences",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
+                        SettingsSection(
+                            title = "Bible preferences",
+                            expanded = prefsExpanded || searching,
+                            onToggle = {
+                                if (!searching) {
+                                    SettingsManager.setSettingsSectionExpanded(
+                                        "prefs",
+                                        !prefsExpanded
+                                    )
+                                }
+                            }
+                        ) {
                         if (prefsAll || languageRow) {
                             DropdownSettingRow(
                                 label = "Language",
@@ -684,36 +814,97 @@ fun SettingsScreen(
                             text = "Current: $selectedLanguage · $selectedTranslation",
                             style = MaterialTheme.typography.bodySmall
                         )
+                        }
                     }
 
-                    Button(
-                        onClick = {
-                            SoundManager.play(SoundEvent.Click)
-                            back()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = RibbonIcons.Back,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Back",
-                            modifier = Modifier.padding(start = 8.dp)
+                    }
+
+                    if (scrollState.maxValue > 0) {
+                        VerticalScrollbar(
+                            adapter = rememberScrollbarAdapter(scrollState),
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .fillMaxHeight()
+                                .width(12.dp)
                         )
                     }
-                }
-
-                if (scrollState.maxValue > 0) {
-                    VerticalScrollbar(
-                        adapter = rememberScrollbarAdapter(scrollState),
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .width(12.dp)
-                    )
                 }
             }
+        }
+    }
+}
+
+
+/**
+ * One fold-out section of the settings screen: a tappable header (title +
+ * chevron) that expands / collapses the section body with a slide-and-
+ * fade animation. While a settings search is active the caller passes
+ * `expanded = true` for every visible section (via `|| searching`), so
+ * matched rows are never hidden behind a fold. The header plays the
+ * app's hover / click sounds.
+ */
+@Composable
+private fun SettingsSection(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val hover = remember { MutableInteractionSource() }
+    val isHovered by hover.collectIsHoveredAsState()
+    LaunchedEffect(isHovered) {
+        if (isHovered) {
+            delay(60.milliseconds)
+            SoundManager.play(SoundEvent.Hover)
+        }
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            // A subtle tint on hover signals the header is tappable (the
+            // chevron already hints it; the tint + hover sound complete
+            // the affordance, matching the app's other interactive rows).
+            .background(
+                if (isHovered) {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                } else {
+                    Color.Transparent
+                }
+            )
+            .hoverable(hover)
+            .clickable {
+                SoundManager.play(SoundEvent.Click)
+                onToggle()
+            }
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            imageVector = if (expanded) RibbonIcons.ChevronDown else RibbonIcons.ChevronRight,
+            contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    AnimatedVisibility(
+        visible = expanded,
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically()
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, end = 4.dp, bottom = 8.dp)
+        ) {
+            content()
         }
     }
 }

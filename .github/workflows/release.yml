@@ -8,9 +8,8 @@ on:
       - "v*"
 
 permissions:
-  # Read-only by default; the `release` job (attaches installers to the
-  # GitHub Release) and the `apt-repo` job (deploys the apt index to the
-  # gh-pages branch) elevate to write.
+  # Read-only by default; the `release` job (attaches installers and the
+  # apt index to the GitHub Release) elevates to write.
   contents: read
 
 jobs:
@@ -82,10 +81,32 @@ jobs:
       - name: Build .deb package
         run: ./gradlew packageDeb --no-daemon
 
+      # Generate the apt Packages index NEXT TO the .deb so the release
+      # job attaches index + installer together. The Filename field is a
+      # RELATIVE path (just the deb's file name): apt always resolves
+      # Filename against the repository base URI — it never honors an
+      # absolute URL there (a flat repo would concatenate the base onto
+      # it and 404). Both files are served from the same base URI, the
+      # GitHub Release download URL, so the resolution just works.
+      - name: Generate apt Packages index
+        run: |
+          set -euo pipefail
+          DEB=$(ls build/compose/binaries/main/deb/*.deb | head -1)
+          PKG=$(dpkg-deb -f "$DEB" Package)
+          VER=$(dpkg-deb -f "$DEB" Version)
+          ARCH=$(dpkg-deb -f "$DEB" Architecture)
+          SIZE=$(stat -c %s "$DEB")
+          SHA=$(sha256sum "$DEB" | awk '{print $1}')
+          OUT=build/compose/binaries/main/deb
+          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nFilename: %s\nSize: %s\nSHA256: %s\n' \
+            "$PKG" "$VER" "$ARCH" "$(basename "$DEB")" "$SIZE" "$SHA" > "$OUT/Packages"
+          gzip -9kn "$OUT/Packages"
+          echo "Indexed $PKG $VER ($ARCH) -> $(basename "$DEB")"
+
       - uses: actions/upload-artifact@v4
         with:
           name: installers-linux
-          path: build/compose/binaries/main/deb/*.deb
+          path: build/compose/binaries/main/deb/
 
   build-msi:
     needs: [test, check-file-sizes]
@@ -147,43 +168,4 @@ jobs:
           files: installers/**
           generate_release_notes: true
 
-  # Publishes a small apt index to GitHub Pages so Linux users can
-  # `sudo apt install bibleapp`. Only the few-KB index is deployed: the
-  # ~200 MB installer itself exceeds GitHub's 100 MB per-file limit, so it
-  # stays attached to the GitHub Release and the index's `Filename:` field
-  # points at that release asset. Requires GitHub Pages enabled with source
-  # "Deploy from a branch" → `gh-pages` (one-time repo setting).
-  apt-repo:
-    needs: [build-deb]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: installers-linux
-          path: debs
 
-      - name: Generate apt Packages index
-        run: |
-          set -euo pipefail
-          DEB=$(ls debs/*.deb | head -1)
-          PKG=$(dpkg-deb -f "$DEB" Package)
-          VER=$(dpkg-deb -f "$DEB" Version)
-          ARCH=$(dpkg-deb -f "$DEB" Architecture)
-          SIZE=$(stat -c %s "$DEB")
-          SHA=$(sha256sum "$DEB" | awk '{print $1}')
-          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$DEB")"
-          mkdir -p apt
-          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nFilename: %s\nSize: %s\nSHA256: %s\n' \
-            "$PKG" "$VER" "$ARCH" "$URL" "$SIZE" "$SHA" > apt/Packages
-          gzip -9kn apt/Packages
-          echo "Indexed $PKG $VER ($ARCH) -> $URL"
-
-      - name: Deploy apt index to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: apt
-          destination_dir: apt

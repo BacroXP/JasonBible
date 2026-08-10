@@ -125,6 +125,11 @@ object RibbonIcons {
     val Loop: ImageVector by lazy {
         icon("Loop", "M7,7h10v3l4,-4 -4,-4v3H5v6h2V7zM17,17H7v-3l-4,4 4,4v-3h12v-6h-2v4z")
     }
+    // Box with an arrow leaving it — open the media on its own service
+    // page (YouTube / Vimeo / …) in the default browser.
+    val OpenExternal: ImageVector by lazy {
+        icon("OpenExternal", "M19,19H5V5h7V3H5C3.9,3 3,3.9 3,5v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2v-7h-2V19zM14,3v2h3.59l-9.83,9.83 1.41,1.41L19,6.41V10h2V3H14z")
+    }
 
     // ---- Media service glyphs ------------------------------------------
     // Monochrome equivalents of the colorful service emojis, so the media

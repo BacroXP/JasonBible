@@ -40,7 +40,7 @@ ships all three, built automatically by CI on each native OS:
 Add the BibleApp apt repo once, then install and update like any other package:
 
 ```bash
-echo "deb [trusted=yes] https://BacroXP.github.io/JasonBible/apt ./" | sudo tee /etc/apt/sources.list.d/bibleapp.list
+echo "deb [trusted=yes] https://github.com/BacroXP/JasonBible/releases/latest/download ./" | sudo tee /etc/apt/sources.list.d/bibleapp.list
 sudo apt update
 sudo apt install bibleapp
 ```
@@ -48,9 +48,11 @@ sudo apt install bibleapp
 Upgrade to new versions with `sudo apt upgrade bibleapp`.
 
 > The repo is **unsigned**, hence the `[trusted=yes]` flag — packages are still
-> checksum-verified against the index (SHA256), and the index itself points at
-> the matching GitHub Release `.deb`. `apt update` may print a warning about a
-> missing *Release* file — expected for an unsigned flat repo, harmless.
+> checksum-verified against the index (SHA256). The index and the installer
+> are both served from the GitHub Release download URL — GitHub redirects
+> each file there, so the ~360 MB `.deb` never has to live in the repo
+> itself. `apt update` may print a warning about a missing *Release* file —
+> expected for an unsigned flat repo, harmless.
 
 ## ✨ Features
 

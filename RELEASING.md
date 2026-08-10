@@ -12,25 +12,25 @@ is fully automated:
 | Event | What runs |
 |---|---|
 | Any push to **any branch** | `test` job (desktop unit tests) |
-| Push of a tag `v*` (e.g. `v1.0.0`) | `test` → `build-deb` (Ubuntu) + `build-msi` (Windows) + `build-dmg` (macOS) in parallel → `release` job attaches the installers to the GitHub Release → `apt-repo` job publishes the apt index to GitHub Pages |
+| Push of a tag `v*` (e.g. `v1.0.0`) | `test` → `build-deb` (Ubuntu) + `build-msi` (Windows) + `build-dmg` (macOS) in parallel → `release` job attaches everything (installers + apt index) to the GitHub Release |
 
 The three installers are built on their **native OS** (the Compose plugin
 cannot cross-compile MSI/DMG), then one final job uploads them all to the
 release created for the tag. Release notes are generated automatically
 from the commits since the previous tag.
 
-Alongside the release, the `apt-repo` job publishes a small apt index to
-the `gh-pages` branch (Linux only): users can then `sudo apt install
-bibleapp` after adding the repo as described in the [README](README.md).
-The index points at the `.deb` attached to the release — GitHub Pages is
-only used for the few-KB index, never for the ~200 MB installer.
+Alongside the installers, `build-deb` also generates the apt `Packages`
+index next to the `.deb`, and the `release` job attaches it. Linux users
+can then `sudo apt install bibleapp` after adding the flat repo
+`https://github.com/BacroXP/JasonBible/releases/latest/download` — the
+same URL serves both the index and the installer (GitHub redirects each
+release asset there), so the ~360 MB `.deb` never needs to be committed
+anywhere. No GitHub Pages setup required.
 
-> **One-time prerequisite:** GitHub Pages must be enabled once in the repo
-> settings (**Settings → Pages → Deploy from a branch → `gh-pages` / root**)
-> — without it the index deploys but `apt update` finds nothing.
->
-> The index is **latest-version-only**: each release replaces it, so users
-> always install the newest version (downgrades aren't offered).
+> The apt index is **latest-version-only**: each release replaces it, so
+> users always install the newest version (downgrades aren't offered).
+> Because it's served via `releases/latest`, the release must be
+> **published** (not draft) before `apt update` finds the new version.
 
 > Installers are **not committed to the repository** — they only exist as
 > release assets (and as local build output under `build/`). The README's

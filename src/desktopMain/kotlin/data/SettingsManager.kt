@@ -232,6 +232,12 @@ object SettingsManager {
     private val reminderTimeMinutesState = mutableStateOf(7 * 60)
     private val reminderPlanIdState = mutableStateOf<String?>(null)
     private val lastReminderShownState = mutableStateOf("")
+    // Ids of the Settings screen's collapsible sections the user has
+    // expanded. SESSION-SCOPED (in-memory only, never written to disk):
+    // every section starts closed on each app launch, and once the user
+    // expands one it stays open for the rest of the session — reopening
+    // Settings shows the sections the user left open.
+    private val settingsExpandedSectionsState = mutableStateOf(setOf<String>())
 
     private const val MIN_SPLIT_RATIO = 0.2f
     private const val MAX_SPLIT_RATIO = 0.8f
@@ -536,6 +542,30 @@ object SettingsManager {
                 save()
             }
         }
+
+    /**
+     * Whether the Settings screen section [sectionId] ("appearance",
+     * "layout", "sound", "copy", "search", "prefs") is currently
+     * expanded. Sections start closed on each app launch; the user's
+     * toggles are remembered for the rest of the session (see
+     * [setSettingsSectionExpanded]).
+     */
+    fun isSettingsSectionExpanded(sectionId: String): Boolean =
+        sectionId in settingsExpandedSectionsState.value
+
+    /**
+     * Set the fold state of a Settings screen section for the current
+     * app session. In-memory only (never persisted), so every section
+     * starts closed on the next launch — but reopening Settings while
+     * the app runs restores the sections the user left open.
+     */
+    fun setSettingsSectionExpanded(sectionId: String, expanded: Boolean) {
+        val current = settingsExpandedSectionsState.value
+        val next = if (expanded) current + sectionId else current - sectionId
+        if (current != next) {
+            settingsExpandedSectionsState.value = next
+        }
+    }
 
     /**
      * App color style key — "normal", "saturated", "gray" or "custom".

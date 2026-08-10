@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import data.MediaFileKind
 import data.MediaService
 import data.mediaKindFor
+import data.openExternalUrl
 import javafx.embed.swing.JFXPanel
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
@@ -254,6 +255,15 @@ private fun VisualPlayerPanel(
                 LoopButton(
                     active = looping,
                     onToggle = { MediaPlayerController.setLooping(!looping) },
+                    modifier = Modifier.size(30.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                // Open the media on its own service page (the YouTube
+                // watch page, etc.) in the default browser.
+                OpenExternalButton(
+                    onOpen = {
+                        MediaPlayerState.currentUrl?.let { openExternalUrl(it) }
+                    },
                     modifier = Modifier.size(30.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
