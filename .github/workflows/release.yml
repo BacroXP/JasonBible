@@ -162,10 +162,26 @@ jobs:
           path: installers
           merge-multiple: true
 
+      # Upload with the `gh` CLI rather than softprops/action-gh-release.
+      # When the release for the tag already exists (a re-run, or a release
+      # created by an earlier attempt) that action re-sends the release's
+      # original `target_commitish` in an update call, which GitHub refuses
+      # for GITHUB_TOKEN with 403 "Resource not accessible by integration"
+      # as soon as the tagged commit's workflow files differ from the default
+      # branch's. `gh release upload` only touches assets, so it is safe to
+      # re-run, and `--clobber` gives us overwrite_files semantics.
       - name: Attach installers to GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: installers/**
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — uploading assets to it."
+          else
+            # Notes are generated from the commits since the previous tag.
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" installers/* --clobber
 
 

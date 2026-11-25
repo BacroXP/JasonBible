@@ -50,7 +50,7 @@ Run these locally before tagging anything:
 ./gradlew packageDeb
 
 # 3. Optional smoke test of the freshly built package
-sudo apt install ./build/compose/binaries/main/deb/bibleapp_2.2.0_amd64.deb
+sudo apt install ./build/compose/binaries/main/deb/bibleapp_2.2.1_amd64.deb
 ```
 
 ## Step 1 — Set the version (only when versioning)
@@ -58,10 +58,10 @@ sudo apt install ./build/compose/binaries/main/deb/bibleapp_2.2.0_amd64.deb
 The version lives in [`build.gradle.kts`](build.gradle.kts):
 
 ```kotlin
-packageVersion = "2.2.0"
+packageVersion = "2.2.1"
 ```
 
-The **git tag must match** (`v` + packageVersion): `2.2.0` → tag `v2.2.0`.
+The **git tag must match** (`v` + packageVersion): `2.2.1` → tag `v2.2.1`.
 
 ## Step 2 — Commit everything and push
 
@@ -99,9 +99,9 @@ a failing test blocks the installer builds by design.
 
 ## Step 5 — Publish the release
 
-1. When the run completes, GitHub creates a **draft** release named after
-   the tag. Open **GitHub → Releases**.
-2. Click **Edit** on the draft:
+1. The `release` job publishes the release for the tag as soon as the
+   installers are attached. Open **GitHub → Releases**.
+2. Click **Edit** on the release:
    - **Title** — e.g. `BibleApp v1.0.0`.
    - **Release notes** — the auto-generated commit list is a good start;
      tidy it into user-facing bullets if you like (see below for a
@@ -141,6 +141,7 @@ a failing test blocks the installer builds by design.
 | Workflow ran, but no installers on the release | The tag wasn't pushed to the *remote*, or the push didn't carry the tag — re-check `git ls-remote --tags origin`. |
 | Only the `test` job ran | Branch pushes never build installers — only `v*` **tags** do. |
 | `release` job failed with permission error | The job needs `contents: write` on the repo (already configured in the workflow; verify repo settings don't override it). |
+| `release` job failed with `Unexpected error fetching GitHub release for tag refs/tags/…: HttpError` | This was `softprops/action-gh-release` re-sending an existing release's `target_commitish` on re-runs, which GitHub refuses for `GITHUB_TOKEN`. The job now uploads assets with `gh release upload --clobber`, so simply re-running the failed job is enough. |
 | MSI/DMG missing | They can only be built on Windows/macOS runners — check the respective job logs for toolchain issues (WiX download, `hdiutil`). |
 | `test` job failed | A unit test is broken — fix and push again before tagging. |
 | `check-file-sizes` job failed | A tracked file exceeds GitHub's 100 MB per-file limit (files over 50 MB only warn). Move the file out of the repo — e.g. attach it to the release as an asset instead — then push again. |

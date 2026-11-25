@@ -42,7 +42,8 @@ internal data class FindState(
 )
 
 // Pure helper that returns all non-overlapping match ranges for `query`
-private fun findMatches(text: String, query: String, caseSensitive: Boolean): List<IntRange> {
+// (internal so the Replace All shrink test can drive the real matcher).
+internal fun findMatches(text: String, query: String, caseSensitive: Boolean): List<IntRange> {
     if (query.isEmpty() || text.isEmpty()) return emptyList()
     val hay = if (caseSensitive) text else text.lowercase()
     val needle = if (caseSensitive) query else query.lowercase()

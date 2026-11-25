@@ -76,6 +76,7 @@ Upgrade to new versions with `sudo apt upgrade bibleapp`.
 | **v2.0.0** | Media — in-app playback & rich media cards | ✅ Released |
 | **v2.1.0** | Quality of life — rename, hover previews, word-study hover, lean stats, auto-save | ✅ Released |
 | **v2.2.0** | Editor & PDF — all heading levels, marker-free editor, clean PDF export | ✅ Released |
+| **v2.2.1** | Fix — Enter in a numbered list no longer crashes the editor | 🚧 Tagged |
 | **v3.0.0** | Accounts — sync & cloud | 🗓 Planned |
 
 **v1.0.0 — the general app** *(released)*
@@ -111,6 +112,12 @@ auto-incrementing numbers included) with tighter, word-like line spacing.
 **PDF export** now prints the note the way the editor shows it, without the
 `#`, `*`, `-`, `>` and `1.` characters, with real paragraph spacing and a
 **Page N of M footer** on every page.
+
+**v2.2.1 — editor crash fix** *(tagged)*
+Pressing **Enter inside a numbered list** could close the note editor with a
+`Range [x, y) out of bounds` error, which then had to be reopened. The editor
+walked back to the previous numbered line with an off-by-one index; it now
+reads that line correctly, so `1. 2. 3. …` keeps counting as you type.
 
 **v3.0.0 — accounts** *(planned)*
 User accounts with cloud sync for notes, settings and reading progress — so

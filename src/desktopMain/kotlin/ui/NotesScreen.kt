@@ -625,8 +625,13 @@ fun NotesScreen(
         } else {
             newValue
         }
-        undoManager.recordChange(editorValue, resolved)
-        editorValue = resolved
+        // A shrinking edit (Replace All) must never hand the field a
+        // selection past the new end. TextFieldValue already constrains
+        // its own selection, so this is a defensive normaliser for every
+        // edit path rather than a fix for one specific handler.
+        val safe = resolved.withSelectionInBounds()
+        undoManager.recordChange(editorValue, safe)
+        editorValue = safe
     }
 
     /**
@@ -1609,19 +1614,12 @@ fun NotesScreen(
                                 },
                                 onReplaceAll = { matches, replacement ->
                                     if (matches.isEmpty()) return@EditorFindBar
-                                    val oldText = editorValue.text
-                                    // Walk substitutions in REVERSE
-                                    // order so earlier offsets stay
-                                    // valid as later positions shift.
-                                    var newText = oldText
-                                    matches.reversed().forEach { range ->
-                                        val sp = range.first.coerceAtMost(newText.length)
-                                        val ep = (range.last + 1).coerceAtMost(newText.length)
-                                        newText = newText.substring(0, sp) +
-                                            replacement +
-                                            newText.substring(ep)
-                                    }
-                                    applyEditorChange(editorValue.copy(text = newText))
+                                    // Splicing + caret placement live in a
+                                    // pure helper so the shrink case is
+                                    // covered end to end by a unit test.
+                                    applyEditorChange(
+                                        replaceAllMatches(editorValue, matches, replacement)
+                                    )
                                 }
                             )
                         }

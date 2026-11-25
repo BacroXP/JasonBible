@@ -72,6 +72,60 @@ internal fun computeTextStats(text: String): TextStats {
 // ---------------------------------------------------------------------------
 // Editor mutations (operate on raw markdown text)
 // ---------------------------------------------------------------------------
+/**
+ * Returns this value with its caret / selection pulled back inside the
+ * current text.
+ *
+ * Edits that SHORTEN the text (Replace All being the main one) are the
+ * classic source of an offset that no longer fits: the field then slices
+ * the new text with the old offsets and throws
+ * `IndexOutOfBoundsException: Range [start, end) out of bounds`.
+ *
+ * `TextFieldValue` itself constrains its selection today, so this is a
+ * defensive normaliser rather than a reproduction of the reported crash
+ * (see `ReplaceAllShrinkTest`). It keeps every edit path — present or
+ * future — from handing the field an offset it would have to fix up.
+ */
+internal fun TextFieldValue.withSelectionInBounds(): TextFieldValue {
+    val last = text.length
+    val start = selection.start.coerceIn(0, last)
+    val end = selection.end.coerceIn(0, last)
+    return if (start == selection.start && end == selection.end) {
+        this
+    } else {
+        copy(selection = TextRange(start, end))
+    }
+}
+
+
+/**
+ * Replaces every [matches] range in [current] with [replacement] and parks
+ * the caret at the start of the first match.
+ *
+ * Substitutions run in REVERSE order so earlier offsets stay valid while
+ * later positions shift. The result is passed through
+ * [withSelectionInBounds] because Replace All usually SHORTENS the note —
+ * a stale caret / selection past the new end crashes the field.
+ */
+internal fun replaceAllMatches(
+    current: TextFieldValue,
+    matches: List<IntRange>,
+    replacement: String
+): TextFieldValue {
+    if (matches.isEmpty()) return current
+    var newText = current.text
+    matches.reversed().forEach { range ->
+        val start = range.first.coerceIn(0, newText.length)
+        val end = (range.last + 1).coerceIn(start, newText.length)
+        newText = newText.substring(0, start) + replacement + newText.substring(end)
+    }
+    val caret = matches.first().first.coerceIn(0, newText.length)
+    return current
+        .copy(text = newText, selection = TextRange(caret))
+        .withSelectionInBounds()
+}
+
+
 internal fun insertAtSelection(current: TextFieldValue, insertion: String): TextFieldValue {
     val start = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
     val end = maxOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
@@ -616,11 +670,17 @@ private fun detectListContinuation(line: String, fullSource: String, lineStart: 
 
 
 private fun lastPlainNumberedNumber(source: String, beforeStart: Int): Int? {
-    var pos = beforeStart
+    // `pos` is always the START of a line (it begins at the caret's line
+    // start and each iteration moves to the previous line's start), so the
+    // character at `pos - 1` is that line's preceding '\n'. Looking for the
+    // newline AT `pos - 1` (the old code did) made lineEnd = pos - 1 and
+    // lineStart = pos, i.e. `substring(1929, 1928)` — the
+    // "Range [1929, 1928) out of bounds" crash on Enter in a numbered list.
+    var pos = beforeStart.coerceIn(0, source.length)
     while (pos > 0) {
-        val nlIdx = source.lastIndexOf('\n', pos - 1)
+        val lineEnd = pos - 1
+        val nlIdx = source.lastIndexOf('\n', lineEnd - 1)
         val lineStart = if (nlIdx < 0) 0 else nlIdx + 1
-        val lineEnd = if (nlIdx < 0) pos else nlIdx
         val line = source.substring(lineStart, lineEnd)
         orderedListRegex.matchAt(line, 0)?.let { match ->
             return match.value.substringBefore('.').toIntOrNull()
