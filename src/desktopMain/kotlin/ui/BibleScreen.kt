@@ -1216,6 +1216,28 @@ fun BibleScreen(
                                             ) {
                                                 GreekNtOnlyHint()
                                             }
+                                            // Chapter-wide word hover: hovering a
+                                            // Hebrew / Greek word anywhere in the
+                                            // chapter highlights every occurrence
+                                            // of it. Counts are computed once per
+                                            // chapter, not per verse.
+                                            var hoveredWordNumber by remember(
+                                                selectedBook.book,
+                                                chapter.chapter,
+                                                currentModuleId
+                                            ) {
+                                                mutableStateOf<String?>(null)
+                                            }
+                                            val chapterWordCounts = remember(
+                                                selectedBook.book,
+                                                chapter.chapter,
+                                                chapter.verses,
+                                                currentModuleId
+                                            ) {
+                                                countWordStudyNumbers(
+                                                    chapter.verses.map { it.text }
+                                                )
+                                            }
                                             chapter.verses.forEach { verse ->
                                                 // Hover highlight adapts to the reference's granularity: a
                                                 // verse ref highlights that single verse, a chapter ref
@@ -1250,6 +1272,9 @@ fun BibleScreen(
                                                     interlinearAligned =
                                                         interlinearMode == InterlinearMode.ALIGNED,
                                                     hoverHighlighted = hoverHighlighted,
+                                                    wordCountsInChapter = chapterWordCounts,
+                                                    hoveredWordNumber = hoveredWordNumber,
+                                                    onHoverWord = { hoveredWordNumber = it },
                                                     onOpenNoteTitle = onOpenNoteTitle,
                                                     onClick = {
                                                         SoundManager.play(SoundEvent.Click)

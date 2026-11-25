@@ -59,12 +59,12 @@ Upgrade to new versions with `sudo apt upgrade bibleapp`.
 | 📖 Read & study | 📝 Notes & organize |
 |---|---|
 | **90+ translations in 52 languages** — from Luther 1912 to the Greek & Hebrew originals, switchable in Settings | Word-style **ribbon toolbar** with Home / Insert / Layout tabs |
-| **Word study with Strong's numbers** — tap any `G`/`H` number for the definition, root & pronunciation; Greek **TVM codes** explain tense / voice / mood | Rich formatting: **H1/H2 headings, quotes, highlights, lists, bold / italic / underline** |
+| **Word study with Strong's numbers** — tap any `G`/`H` number for the definition, root & pronunciation; hover a Hebrew/Greek word to light up every occurrence in the chapter, with the count beside the cursor | Rich formatting: **H1/H2 headings, quotes, highlights, lists, bold / italic / underline** |
 | **Interlinear view (ΑΩ)** — matching Greek beneath each verse, or **word-aligned** columns paired by Strong's number | **Media references** — `@youtube:…`, `@spotify:…`, `@url:…` render as chips with an in-app preview panel |
 | **Full-text Bible search (Ctrl+F)** — grouped by book, case/whole-word toggles, scope filter, plus **Strong's reverse concordance** (`G25`, `H1`) | **Global notes search (Ctrl+Shift+F)** — full-text across every note, click-to-open |
-| **Jump to any verse (Ctrl+G)** with book autocomplete, plus ← / → history | **`$Joh` inline autocomplete** — type a book and complete the reference |
+| **Jump to any verse (Ctrl+G)** with book autocomplete, plus ← / → history | **`$Joh` inline autocomplete** — type a book and complete the reference; **hover a reference chip to preview its verses** |
 | Whole-book **continuous reading** mode | Copy verses/ranges, **export chapters & notes to PDF** |
-| **365-day reading plan** with progress, plus a daily verse on Home | Auto-save to disk · undo/redo · find & replace |
+| **365-day reading plan** with progress, plus a daily verse on Home | Auto-save to disk · rename notes without editing their first line · undo/redo · find & replace |
 | Verse highlighting (5 colors), tags, read-tracking & favorites | Notes are plain `.note` files in `~/.bibleapp/notes` |
 | **Split view** — read and take notes side by side | Dark / light theme, zoom (75–200 %), sound effects, DE / EN UI |
 
@@ -73,7 +73,8 @@ Upgrade to new versions with `sudo apt upgrade bibleapp`.
 | Version | Focus | Status |
 |---------|-------|--------|
 | **v1.0.0** | General — Bible reading & notes | ✅ Released |
-| **v2.0.0** | Media — in-app playback & rich media cards | 🚧 In development |
+| **v2.0.0** | Media — in-app playback & rich media cards | ✅ Released |
+| **v2.1.0** | Quality of life — rename, hover previews, word-study hover, lean stats, auto-save | ✅ Released |
 | **v3.0.0** | Accounts — sync & cloud | 🗓 Planned |
 
 **v1.0.0 — the general app** *(released)*
@@ -91,6 +92,15 @@ An **in-app media player** plays YouTube, Vimeo, SoundCloud & local files
 (streams resolved by the bundled yt-dlp) and embeds Spotify — with pause,
 stop and a **loop-forever** toggle. `@Phrase` autocomplete searches YouTube
 live, and a hover-out media panel docks under the editor for quick access.
+
+**v2.1.0 — quality of life** *(released)*
+Small things that remove friction: notes can be **renamed without editing their
+first line** (the chosen name is stored separately, so the body stays exactly as
+written), hovering a `$Book$C$V` reference in the editor shows **its verses at a
+glance**, hovering a Hebrew/Greek word **highlights every occurrence in the
+chapter and shows the count** next to the cursor, the editor footer keeps only
+the numbers worth reading (**words · characters**), and notes **auto-save** once
+typing pauses.
 
 **v3.0.0 — accounts** *(planned)*
 User accounts with cloud sync for notes, settings and reading progress — so
@@ -140,6 +150,12 @@ them here, e.g.:
 | Settings | `~/.bibleapp/private.json` |
 | Notes | `~/.bibleapp/notes/*.note` |
 | Translations | `src/desktopMain/resources/bible/` (auto-detected on startup) |
+
+## What is coming?
+
+| What           | Progress
+|-----           |---------
+| Editor Update  | IN PLANNING
 
 ## 🔗 Links
 

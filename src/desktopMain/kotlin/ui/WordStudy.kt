@@ -1,7 +1,10 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,13 +18,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -29,11 +40,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import data.SoundEvent
 import data.SoundManager
 import data.StrongsRepository
+import kotlin.math.roundToInt
 
 
 // ---------------------------------------------------------------------------
@@ -156,6 +171,28 @@ internal fun parseWordStudyTokens(text: String): List<StrongsToken> {
     return parseParsedTokens(text)
 }
 
+/**
+ * Occurrences of every Strong's number across [texts] — normally the
+ * verses of one chapter. Feeds the "×N in this chapter" badge shown while
+ * a Hebrew / Greek word is hovered, so the user can see at a glance how
+ * often a word occurs in the passage. Verses without word-study markup
+ * contribute nothing.
+ */
+internal fun countWordStudyNumbers(texts: List<String>): Map<String, Int> {
+    if (texts.isEmpty()) return emptyMap()
+    val counts = HashMap<String, Int>()
+    for (text in texts) {
+        for (token in parseWordStudyTokens(text)) {
+            counts[token.number] = (counts[token.number] ?: 0) + 1
+        }
+    }
+    return counts
+}
+
+/** Display range of one token inside the rendered text, used to map the
+ *  pointer back to the Strong's word it is over. */
+private data class TokenDisplaySpan(val range: IntRange, val token: StrongsToken)
+
 /** One column of the word-aligned interlinear. */
 internal data class AlignedPair(
     /** The Greek TR token, or null when the English word has no Greek counterpart. */
@@ -273,10 +310,21 @@ internal fun StrongsVerseText(
     tokens: List<StrongsToken>,
     activeNumber: String?,
     onToggle: (StrongsToken) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /**
+     * Strong's number hovered ANYWHERE in the chapter. Every token that
+     * carries it is tinted, so all occurrences of the same Hebrew / Greek
+     * word light up at once.
+     */
+    hoverNumber: String? = null,
+    /** Occurrences of [hoverNumber] in the chapter, shown in the badge. */
+    hoverCount: Int = 0,
+    /** Reports the Strong's number under the pointer (null on exit). */
+    onHoverWord: (String?) -> Unit = {}
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val primaryContainer = MaterialTheme.colorScheme.primaryContainer
+    val hoverContainer = MaterialTheme.colorScheme.tertiaryContainer
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val bodyFontSize = MaterialTheme.typography.bodyMedium.fontSize
 
@@ -316,21 +364,83 @@ internal fun StrongsVerseText(
         )
     }
 
-    Text(
-        text = buildStrongsText(
-            text = text,
-            tokens = tokens,
-            activeNumber = activeNumber,
-            bodyFontSize = bodyFontSize,
-            primary = primary,
-            primaryContainer = primaryContainer,
-            muted = muted,
-            linkStyles = linkStyles,
-            listener = listener
-        ),
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = modifier
+    val spans = ArrayList<TokenDisplaySpan>(tokens.size)
+    val annotated = buildStrongsText(
+        text = text,
+        tokens = tokens,
+        activeNumber = activeNumber,
+        bodyFontSize = bodyFontSize,
+        primary = primary,
+        primaryContainer = primaryContainer,
+        muted = muted,
+        linkStyles = linkStyles,
+        listener = listener,
+        hoverNumber = hoverNumber,
+        hoverContainer = hoverContainer,
+        spans = spans
     )
+
+    // Pointer-to-word mapping: the token under the pointer is resolved via
+    // the layout result, then reported upward so the WHOLE chapter can
+    // highlight it. The count badge is drawn as a non-focusable popup a
+    // little right/below the pointer, so it never sits under the cursor
+    // (which would make the hover flicker).
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var hoveredToken by remember { mutableStateOf<StrongsToken?>(null) }
+    var pointer by remember { mutableStateOf(Offset.Zero) }
+
+    Box(modifier = modifier) {
+        Text(
+            text = annotated,
+            style = MaterialTheme.typography.bodyMedium,
+            onTextLayout = { layout = it },
+            modifier = Modifier
+                .onPointerEvent(PointerEventType.Move) { event ->
+                    val pos = event.changes.firstOrNull()?.position
+                        ?: return@onPointerEvent
+                    val result = layout ?: return@onPointerEvent
+                    val offset = result.getOffsetForPosition(pos)
+                    val token = spans
+                        .firstOrNull { offset >= it.range.first && offset <= it.range.last }
+                        ?.token
+                    pointer = pos
+                    if (token?.number != hoveredToken?.number) {
+                        hoveredToken = token
+                        onHoverWord(token?.number)
+                    }
+                }
+                .onPointerEvent(PointerEventType.Exit) {
+                    if (hoveredToken != null) {
+                        hoveredToken = null
+                        onHoverWord(null)
+                    }
+                }
+        )
+
+        val hovered = hoveredToken
+        if (hovered != null) {
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = IntOffset(
+                    pointer.x.roundToInt() + 12,
+                    pointer.y.roundToInt() + 18
+                ),
+                properties = PopupProperties(focusable = false)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.inverseSurface
+                ) {
+                    Text(
+                        text = "${hovered.number} \u00B7 ${hoverCount}\u00D7 in this chapter",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 
@@ -343,7 +453,10 @@ private fun buildStrongsText(
     primaryContainer: Color,
     muted: Color,
     linkStyles: TextLinkStyles,
-    listener: LinkInteractionListener
+    listener: LinkInteractionListener,
+    hoverNumber: String? = null,
+    hoverContainer: Color = Color.Unspecified,
+    spans: MutableList<TokenDisplaySpan>? = null
 ): AnnotatedString {
     val numberSize = bodyFontSize * 0.72f
     val parsingSize = bodyFontSize * 0.6f
@@ -351,13 +464,24 @@ private fun buildStrongsText(
         var pos = 0
         for (token in tokens) {
             if (token.start > pos) append(text.substring(pos, token.start))
+            // Display range of the whole token (word + numbers + parsing),
+            // so pointer hit-testing can map back to the word.
+            val tokenSpanStart = length
             // The studied word is highlighted whether its lemma number OR
-            // its TVM code was clicked.
+            // its TVM code was clicked; a chapter-wide hover tints every
+            // occurrence of the hovered number.
             val wordActive = token.number == activeNumber || token.tvm == activeNumber
-            if (wordActive) {
-                // Persistent background on the word being studied, so the
-                // open panel is easy to trace back to its word.
-                withStyle(SpanStyle(background = primaryContainer.copy(alpha = 0.3f))) {
+            val wordHovered = hoverNumber != null && token.number == hoverNumber
+            if (wordActive || wordHovered) {
+                withStyle(
+                    SpanStyle(
+                        background = if (wordActive) {
+                            primaryContainer.copy(alpha = 0.3f)
+                        } else {
+                            hoverContainer.copy(alpha = 0.4f)
+                        }
+                    )
+                ) {
                     append(token.word)
                 }
             } else {
@@ -376,10 +500,10 @@ private fun buildStrongsText(
                     color = primary,
                     fontSize = numberSize,
                     baselineShift = BaselineShift.Superscript,
-                    background = if (numberActive) {
-                        primaryContainer.copy(alpha = 0.5f)
-                    } else {
-                        Color.Unspecified
+                    background = when {
+                        numberActive -> primaryContainer.copy(alpha = 0.5f)
+                        wordHovered -> hoverContainer.copy(alpha = 0.5f)
+                        else -> Color.Unspecified
                     }
                 )
             ) {
@@ -436,6 +560,7 @@ private fun buildStrongsText(
                 }
             }
             pos = token.end
+            spans?.add(TokenDisplaySpan(tokenSpanStart until length, token))
         }
         if (pos < text.length) append(text.substring(pos))
     }

@@ -112,6 +112,13 @@ internal fun EditorSurface(
     onTapReference: (ReferenceHit?, anchor: Offset, shiftPressed: Boolean) -> Unit,
     onHoverBibleReference: (BibleReferenceSelection?) -> Unit,
     /**
+     * Position-carrying variant of [onHoverBibleReference]: the reference
+     * under the pointer plus the pointer's WINDOW position, so the notes
+     * screen can show a small verse preview next to the cursor. Null when
+     * the pointer leaves the editor or moves onto plain text.
+     */
+    onHoverBibleReferenceAt: (BibleReferenceSelection?, Offset) -> Unit = { _, _ -> },
+    /**
      * Double-click word selection. `start` and `end` are source-text
      * byte offsets into `value.text`; the parent wires this through
      * `applyEditorChange` so the new TextRange goes through the
@@ -186,11 +193,11 @@ internal fun EditorSurface(
     val evaluateHover: (Offset) -> Unit = hover@{ pos ->
         val hit = resolveReferenceAt(pos)
         hoveredReference = hit
-        onHoverBibleReference(
-            (hit as? ReferenceHit.Bible)?.let {
-                BibleReferenceSelection(it.match.book, it.match.chapter, it.match.verse)
-            }
-        )
+        val selection = (hit as? ReferenceHit.Bible)?.let {
+            BibleReferenceSelection(it.match.book, it.match.chapter, it.match.verse)
+        }
+        onHoverBibleReference(selection)
+        onHoverBibleReferenceAt(selection, editorWindowPos + pos)
     }
 
     Surface(
@@ -295,6 +302,7 @@ internal fun EditorSurface(
                                     lastHoverPos = null
                                     hoveredReference = null
                                     onHoverBibleReference(null)
+                                    onHoverBibleReferenceAt(null, Offset.Zero)
                                 }
                                 else -> Unit
                             }
