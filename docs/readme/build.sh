@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerate README.md from the HTML source in this folder.
 #
-#   pandoc docs/readme/index.html -f html -t gfm --wrap=none -o README.md
+#   pandoc docs/readme/readme.html -f html -t gfm --wrap=none -o README.md
 #
 # The plain pandoc command keeps GitHub-hostile attributes and the page-local
 # icon path, so prefer this script for the real output.
@@ -18,7 +18,7 @@ if ! command -v pandoc >/dev/null 2>&1; then
     exit 1
 fi
 
-pandoc docs/readme/index.html --from html --to gfm --wrap=none --output README.md
+pandoc docs/readme/readme.html --from html --to gfm --wrap=none --output README.md
 
 # Post-pass for GitHub's GFM rendering:
 #  - pandoc maps the hero's align="center" to data-align, which GitHub ignores;
@@ -43,10 +43,10 @@ rm -f README.md.bak
 # Pandoc drops HTML comments, so add the "generated file" warning here.
 tmp="$(mktemp)"
 {
-    echo '<!-- Generated from docs/readme/index.html by docs/readme/build.sh; edit the HTML, not this file. -->'
+    echo '<!-- Generated from docs/readme/readme.html by docs/readme/build.sh; edit the HTML, not this file. -->'
     echo
     cat README.md
 } > "$tmp"
 mv "$tmp" README.md
 
-echo "README.md regenerated from docs/readme/index.html"
+echo "README.md regenerated from docs/readme/readme.html"
