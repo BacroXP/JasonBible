@@ -1384,6 +1384,7 @@ fun NotesScreen(
                                                             }
                                                         },
                                                         onDelete = { deleteCandidate = note },
+                                                        onRename = { renameCandidate = note },
                                                         onMove = {
                                                             folderDialog = FolderDialogMode.Move(
                                                                 note.fileName,
@@ -1414,6 +1415,7 @@ fun NotesScreen(
                                                             }
                                                         },
                                                         onDelete = { deleteCandidate = note },
+                                                        onRename = { renameCandidate = note },
                                                         onMove = {
                                                             folderDialog = FolderDialogMode.Move(
                                                                 note.fileName,
