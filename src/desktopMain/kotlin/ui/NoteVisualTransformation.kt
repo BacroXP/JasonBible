@@ -181,7 +181,8 @@ internal class NoteVisualTransformation(
         get() = palette.noteLinkBackground
 
     enum class BlockKind {
-        HEADING1, HEADING2, BULLET, NUMBERED, QUOTE, QUOTE_BULLET, QUOTE_NUMBERED,
+        HEADING1, HEADING2, HEADING3, HEADING4, HEADING5, HEADING6,
+        BULLET, NUMBERED, QUOTE, QUOTE_BULLET, QUOTE_NUMBERED,
         COLORED_QUOTE, REFERENCE, PARAGRAPH, RTL_LINE, LTR_LINE
     }
 
@@ -246,23 +247,34 @@ internal class NoteVisualTransformation(
             scanPos = nlPos + 1
         }
 
-        // ----- Pass 2: assign auto-numbers to QUOTE_NUMBERED lines -----
-        // Quote-prefixed lines (PLAIN QUOTE, QUOTE_BULLET, QUOTE_NUMBERED)
-        // continue the sequence; anything else (paragraph, heading,
-        // reference, RLM/LTR marker, etc.) resets the counter to 0.
+        // ----- Pass 2: assign auto-numbers to numbered list lines -----
+        // Both plain (`1. item`) and quote-prefixed (`># item`) numbered
+        // lists get sequential numbers of their own: the source marker is
+        // hidden and its number re-synthesised, so a list pasted with
+        // `1.` on every line still reads 1, 2, 3 like Word. Quote-prefixed
+        // lines (PLAIN QUOTE, QUOTE_BULLET, QUOTE_NUMBERED) keep their
+        // chain alive; anything else (paragraph, heading, reference,
+        // RLM/LTR marker, etc.) resets both counters to 0.
         val assignedNumbers = IntArray(analyses.size)
-        var counter = 0
+        var quoteCounter = 0
+        var plainCounter = 0
         for (i in analyses.indices) {
-            val kind = analyses[i].kind
-            when {
-                kind == BlockKind.QUOTE_NUMBERED -> {
-                    counter += 1
-                    assignedNumbers[i] = counter
+            when (analyses[i].kind) {
+                BlockKind.QUOTE_NUMBERED -> {
+                    quoteCounter += 1
+                    assignedNumbers[i] = quoteCounter
                 }
-                kind == BlockKind.QUOTE || kind == BlockKind.QUOTE_BULLET -> {
+                BlockKind.NUMBERED -> {
+                    plainCounter += 1
+                    assignedNumbers[i] = plainCounter
+                }
+                BlockKind.QUOTE, BlockKind.QUOTE_BULLET -> {
                     // Chain alive; do not reset, do not increment.
                 }
-                else -> counter = 0
+                else -> {
+                    quoteCounter = 0
+                    plainCounter = 0
+                }
             }
         }
 
@@ -298,9 +310,13 @@ internal class NoteVisualTransformation(
             // visible text is just the inner-stripped content of the
             // line, so the `prepended + visibleText` style call below
             // receives an empty prefix for those cases.
+            // Bullets and numbered markers are HIDDEN in the source
+            // (`- `, `1. `) and re-synthesised here, so the editor shows a
+            // real `•` / `1.` like Word instead of silently dropping the
+            // marker and leaving an indented paragraph behind.
             val prepended = when (analysis.kind) {
-                BlockKind.QUOTE_NUMBERED -> "${assignedNumbers[i]}. "
-                BlockKind.QUOTE_BULLET -> "\u2022 "
+                BlockKind.QUOTE_NUMBERED, BlockKind.NUMBERED -> "${assignedNumbers[i]}. "
+                BlockKind.QUOTE_BULLET, BlockKind.BULLET -> "\u2022 "
                 else -> ""
             }
             val prependedLen = prepended.length
@@ -404,8 +420,8 @@ internal class NoteVisualTransformation(
                 // line so inline chips inside it map to the correct source
                 // offsets (otherwise a media token's first character maps
                 // to the consumed space and tap/hover misses the token).
-                val trailBase = lineStart + rawLine.indexOf(cqTrailing, gapSrcEnd - lineStart)
-                    .coerceAtLeast(0)
+                val trailBase = (lineStart + rawLine.indexOf(cqTrailing, gapSrcEnd - lineStart))
+                    .coerceIn(gapSrcEnd, lineEnd)
                 val trailTokens = ArrayList<Triple<Int, Int, Any>>(4)
                 findReferenceTokens(cqTrailing)
                     .forEach { trailTokens.add(Triple(it.sourceStart, it.sourceEnd, it)) }
@@ -416,6 +432,27 @@ internal class NoteVisualTransformation(
                 trailTokens.sortBy { it.first }
                 var trailSrcAbs = 0
                 var dst = visibleStartInOut + cqInnerText.length
+                // The whitespace the regex consumed between `[#hex]` and
+                // the trailing text used to fall through EVERY mapping
+                // span and was never displayed, gluing the trailing note
+                // onto the coloured phrase ("verseLukas 3:16"). Show the
+                // gap as exactly one space and cover the source range so
+                // cursor offsets inside it round-trip.
+                val gapWhitespace = source.substring(gapSrcEnd, trailBase)
+                if (gapWhitespace.isNotEmpty()) {
+                    out.append(' ')
+                    display.append(' ')
+                    ranges.add(
+                        MappingSpan(
+                            originalStart = gapSrcEnd,
+                            originalEnd = trailBase,
+                            transformedStart = dst,
+                            transformedEnd = dst + 1,
+                            delta = gapWhitespace.length - 1
+                        )
+                    )
+                    dst += 1
+                }
                 fun emitTrailPlain(fromAbs: Int, toAbs: Int) {
                     if (toAbs <= fromAbs) return
                     val plain = cqTrailing.substring(fromAbs, toAbs)
@@ -1184,8 +1221,18 @@ internal class NoteVisualTransformation(
             )
         }
 
-        if (raw.startsWith("## ")) return LineAnalysis(BlockKind.HEADING2, hiddenLen = 3)
-        if (raw.startsWith("# ")) return LineAnalysis(BlockKind.HEADING1, hiddenLen = 2)
+        // Headings: `# ` through `###### ` (Word's Heading 1–6).
+        headingPrefixRegex.find(raw)?.takeIf { it.range.first == 0 }?.let { match ->
+            val kind = when (match.value.count { it == '#' }) {
+                1 -> BlockKind.HEADING1
+                2 -> BlockKind.HEADING2
+                3 -> BlockKind.HEADING3
+                4 -> BlockKind.HEADING4
+                5 -> BlockKind.HEADING5
+                else -> BlockKind.HEADING6
+            }
+            return LineAnalysis(kind, hiddenLen = match.value.length)
+        }
         if (raw.startsWith("- ")) return LineAnalysis(BlockKind.BULLET, hiddenLen = 2)
 
         orderedListRegex.matchAt(raw, 0)?.let { match ->
@@ -1354,9 +1401,17 @@ internal class NoteVisualTransformation(
         )
     }
 
+    /** Bold heading span whose size scales with the editor zoom. */
+    private fun headingSpan(baseSize: Float, color: Color = palette.onSurface): SpanStyle =
+        SpanStyle(fontWeight = FontWeight.Bold, fontSize = (baseSize * fontScale).sp, color = color)
+
     private fun spanFor(analysis: LineAnalysis): SpanStyle? = when (analysis.kind) {
-        BlockKind.HEADING1 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = (28 * fontScale).sp, color = palette.onSurface)
-        BlockKind.HEADING2 -> SpanStyle(fontWeight = FontWeight.Bold, fontSize = (22 * fontScale).sp, color = palette.onSurface)
+        BlockKind.HEADING1 -> headingSpan(28f)
+        BlockKind.HEADING2 -> headingSpan(22f)
+        BlockKind.HEADING3 -> headingSpan(18f)
+        BlockKind.HEADING4 -> headingSpan(16f)
+        BlockKind.HEADING5 -> headingSpan(14.5f)
+        BlockKind.HEADING6 -> headingSpan(13f, palette.onSurfaceVariant)
         BlockKind.QUOTE -> SpanStyle(
             fontStyle = FontStyle.Italic,
             fontSize = (16 * fontScale).sp,
@@ -1377,10 +1432,10 @@ internal class NoteVisualTransformation(
         // "Book C:V" portion only by `applyReferenceStyles`; this keeps
         // the font size consistent and leaves a trailing label (if any)
         // in plain paragraph text.
-        BlockKind.REFERENCE -> SpanStyle(fontSize = 15.sp, color = palette.onSurface)
+        BlockKind.REFERENCE -> SpanStyle(fontSize = (16 * fontScale).sp, color = palette.onSurface)
         BlockKind.BULLET, BlockKind.NUMBERED, BlockKind.RTL_LINE, BlockKind.LTR_LINE ->
-            SpanStyle(fontSize = 15.sp, color = palette.onSurface)
-        BlockKind.PARAGRAPH -> SpanStyle(fontSize = 16.sp, color = palette.onSurface)
+            SpanStyle(fontSize = (16 * fontScale).sp, color = palette.onSurface)
+        BlockKind.PARAGRAPH -> SpanStyle(fontSize = (16 * fontScale).sp, color = palette.onSurface)
     }
 
     private fun paragraphFor(analysis: LineAnalysis): ParagraphStyle? {
@@ -1403,55 +1458,39 @@ internal class NoteVisualTransformation(
         }
         val dir = analysis.direction
         val align = analysis.textAlign
+        // Line heights scale with the editor zoom alongside the font sizes
+        // in `spanFor` (a zoomed heading used to keep its unzoomed line
+        // height and clip), and stay at ~1.3× so a note reads like a
+        // single-spaced Word document rather than a double-spaced draft.
+        fun style(baseLineHeight: Float): ParagraphStyle = ParagraphStyle(
+            lineHeight = (baseLineHeight * fontScale).sp,
+            textIndent = TextIndent(firstLine = firstIndentDp.sp, restLine = restIndentDp.sp),
+            textDirection = dir,
+            textAlign = align
+        )
         return when (analysis.kind) {
-            BlockKind.HEADING1 -> ParagraphStyle(
-                lineHeight = 34.sp,
-                textIndent = TextIndent(firstLine = firstIndentDp.sp, restLine = restIndentDp.sp),
-                textDirection = dir,
-                textAlign = align
-            )
-            BlockKind.HEADING2 -> ParagraphStyle(
-                lineHeight = 30.sp,
-                textIndent = TextIndent(firstLine = firstIndentDp.sp, restLine = restIndentDp.sp),
-                textDirection = dir,
-                textAlign = align
-            )
-            BlockKind.QUOTE -> ParagraphStyle(
-                lineHeight = 22.sp,
-                textIndent = TextIndent(firstLine = firstIndentDp.sp, restLine = restIndentDp.sp),
-                textDirection = dir,
-                textAlign = align
-            )
-            BlockKind.QUOTE_BULLET, BlockKind.QUOTE_NUMBERED -> ParagraphStyle(
-                lineHeight = 22.sp,
-                textIndent = TextIndent(firstLine = firstIndentDp.sp, restLine = restIndentDp.sp),
-                textDirection = dir,
-                textAlign = align
-            )
+            BlockKind.HEADING1 -> style(34f)
+            BlockKind.HEADING2 -> style(28f)
+            BlockKind.HEADING3 -> style(23f)
+            BlockKind.HEADING4 -> style(21f)
+            BlockKind.HEADING5 -> style(19f)
+            BlockKind.HEADING6 -> style(18f)
+            BlockKind.QUOTE -> style(21f)
+            BlockKind.QUOTE_BULLET, BlockKind.QUOTE_NUMBERED -> style(21f)
             BlockKind.COLORED_QUOTE -> ParagraphStyle(
-                lineHeight = 22.sp,
+                lineHeight = (21 * fontScale).sp,
                 textIndent = TextIndent(firstLine = 24.sp, restLine = 24.sp),
                 textDirection = dir,
                 textAlign = align
             )
             BlockKind.REFERENCE -> ParagraphStyle(
-                lineHeight = 22.sp,
+                lineHeight = (20 * fontScale).sp,
                 textIndent = TextIndent(firstLine = 0.sp, restLine = 0.sp),
                 textDirection = dir,
                 textAlign = align
             )
-            BlockKind.BULLET, BlockKind.NUMBERED -> ParagraphStyle(
-                lineHeight = 22.sp,
-                textIndent = TextIndent(firstLine = firstIndentDp.sp, restLine = restIndentDp.sp),
-                textDirection = dir,
-                textAlign = align
-            )
-            BlockKind.RTL_LINE, BlockKind.LTR_LINE, BlockKind.PARAGRAPH -> ParagraphStyle(
-                lineHeight = 24.sp,
-                textIndent = TextIndent(firstLine = firstIndentDp.sp, restLine = restIndentDp.sp),
-                textDirection = dir,
-                textAlign = align
-            )
+            BlockKind.BULLET, BlockKind.NUMBERED -> style(21f)
+            BlockKind.RTL_LINE, BlockKind.LTR_LINE, BlockKind.PARAGRAPH -> style(21f)
         }
     }
 

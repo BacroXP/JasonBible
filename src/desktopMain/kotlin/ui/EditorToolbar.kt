@@ -241,6 +241,19 @@ internal fun EditorToolbar(
                         StyleButton(icon = RibbonIcons.Heading2, tooltip = "Heading 2") {
                             onEditorValueChange(prefixSelectedLines(editorValue, "## "))
                         }
+                        // Heading 3–6 have no icons of their own, so they
+                        // render as compact text buttons: every level is one
+                        // click away without opening the Styles dropdown.
+                        listOf(
+                            "H3" to "### ",
+                            "H4" to "#### ",
+                            "H5" to "##### ",
+                            "H6" to "###### "
+                        ).forEach { (label, prefix) ->
+                            StyleButton(label = label, tooltip = "Heading ${label.drop(1)}") {
+                                onEditorValueChange(prefixSelectedLines(editorValue, prefix))
+                            }
+                        }
                         StyleButton(icon = RibbonIcons.Quote, tooltip = "Block quote") {
                             onEditorValueChange(prefixSelectedLines(editorValue, "> "))
                         }

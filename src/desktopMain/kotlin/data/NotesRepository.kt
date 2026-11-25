@@ -573,17 +573,19 @@ object NotesRepository {
             val line = stripLeadingMarkers(rawLine.trimEnd())
             if (line.isBlank()) return@forEach
 
+            // Headings: `# ` (the note title) through `###### ` — Word's
+            // Heading 1–6. Levels 3+ used to fall through to a plain
+            // paragraph, which left the raw `###` markers in note previews.
+            val headingMatch = headingRegex.matchAt(line, 0)
+            if (headingMatch != null) {
+                val level = headingMatch.value.count { it == '#' }
+                val text = line.substring(headingMatch.range.last + 1).trim()
+                if (level == 1) title = text
+                blocks.add(HeadingBlock(level, text))
+                return@forEach
+            }
+
             when {
-                line.startsWith("# ") -> {
-                    val text = line.removePrefix("# ").trim()
-                    title = text
-                    blocks.add(HeadingBlock(1, text))
-                }
-
-                line.startsWith("## ") -> {
-                    blocks.add(HeadingBlock(2, line.removePrefix("## ").trim()))
-                }
-
                 unorderedListRegex.containsMatchIn(line) -> {
                     val text = line.replaceFirst(unorderedListRegex, "").trim()
                     blocks.add(ListBlock(ordered = false, text = text))
@@ -976,4 +978,7 @@ object NotesRepository {
     // `- ` bullet markers have no UI-side counterpart (the editor matches
     // a literal `- `), so this one stays local to the parser.
     private val unorderedListRegex = Regex("^-\\s+")
+
+    // Markdown heading prefix (`# ` … `###### `), levels 1–6.
+    private val headingRegex = Regex("^#{1,6}\\s+")
 }

@@ -113,10 +113,19 @@ internal fun prefixSelectedLines(current: TextFieldValue, prefix: String): TextF
     // Prefixes go AFTER any leading alignment/direction markers so a
     // centered line stays centered when it becomes a heading (`\u200B# …`
     // rather than `# \u200B…`, which would mis-parse the heading).
+    //
+    // Pressing the same list / heading button twice removes the prefix
+    // again (Word's toggle behaviour), and pressing a different one
+    // REPLACES the current block prefix instead of stacking `- # text`.
     fun applyToLine(line: String): String {
-        if (line.isBlank()) return line
         val markers = leadingMarkers(line)
-        return markers + prefix + stripLeadingMarkers(line)
+        val content = stripLeadingMarkers(line)
+        val newContent = if (prefix.isNotEmpty() && content.startsWith(prefix)) {
+            content.removePrefix(prefix)
+        } else {
+            prefix + stripBlockPrefixes(content)
+        }
+        return markers + newContent
     }
 
     if (start == end) {
@@ -127,14 +136,21 @@ internal fun prefixSelectedLines(current: TextFieldValue, prefix: String): TextF
             append(current.text.substring(0, lineStart))
             append(newLine)
         }
-        // The prefix is inserted after any leading markers, always
-        // shifting the caret by exactly the prefix length.
-        val cursor = start + prefix.length
+        // The prefix is written at the LINE START, so the caret keeps its
+        // position relative to the text: it shifts by exactly the number
+        // of characters that were added/removed. A blank line really does
+        // get the prefix (starting a list / heading on a fresh line used
+        // to be a no-op that also pushed the caret past the end of the
+        // line, so the next keystroke landed on the wrong line).
+        val cursor = (start + (newLine.length - line.length))
+            .coerceIn(lineStart, newText.length)
         return current.copy(text = newText, selection = TextRange(cursor, cursor))
     }
 
     val block = current.text.substring(start, end)
-    val prefixed = block.lines().joinToString("\n", transform = ::applyToLine)
+    val prefixed = block.lines().joinToString("\n") { line ->
+        if (line.isBlank()) line else applyToLine(line)
+    }
     val newText = buildString {
         append(current.text.substring(0, start))
         append(prefixed)
@@ -149,12 +165,25 @@ internal fun prefixSelectedLines(current: TextFieldValue, prefix: String): TextF
  * Paragraph styles selectable from the Word-style "Styles" dropdown.
  * Each style maps to the block prefix written into the source text.
  */
-internal enum class NoteStyle(val label: String, val prefix: String) {
+internal enum class NoteStyle(
+    val label: String,
+    val prefix: String,
+    /** Markdown heading level of this style (1–6), 0 for non-headings. */
+    val headingLevel: Int = 0
+) {
     NORMAL("Normal", ""),
-    H1("H1", "# "),
-    H2("H2", "## "),
+    H1("H1", "# ", 1),
+    H2("H2", "## ", 2),
+    H3("H3", "### ", 3),
+    H4("H4", "#### ", 4),
+    H5("H5", "##### ", 5),
+    H6("H6", "###### ", 6),
     QUOTE("Quote", "> ")
 }
+
+/** The [NoteStyle] for a markdown heading [level] (1–6), or null. */
+internal fun styleForHeadingLevel(level: Int): NoteStyle? =
+    NoteStyle.entries.firstOrNull { it.headingLevel == level }
 
 
 /**
@@ -167,12 +196,9 @@ internal fun currentBlockStyle(current: TextFieldValue): NoteStyle {
     val lineStart = current.text.lastIndexOf('\n', caret - 1).let { if (it < 0) 0 else it + 1 }
     val lineEnd = current.text.indexOf('\n', caret).let { if (it < 0) current.text.length else it }
     val line = stripLeadingMarkers(current.text.substring(lineStart, lineEnd))
-    return when {
-        line.startsWith("## ") -> NoteStyle.H2
-        line.startsWith("# ") -> NoteStyle.H1
-        line.startsWith(">") -> NoteStyle.QUOTE
-        else -> NoteStyle.NORMAL
-    }
+    val headingLevel = headingLevelOf(line)
+    if (headingLevel > 0) return styleForHeadingLevel(headingLevel) ?: NoteStyle.NORMAL
+    return if (line.startsWith(">")) NoteStyle.QUOTE else NoteStyle.NORMAL
 }
 
 
@@ -183,16 +209,21 @@ internal fun currentBlockStyle(current: TextFieldValue): NoteStyle {
  * applying a new paragraph style so the result is idempotent
  * (re-applying the same style never stacks prefixes).
  */
-private fun stripBlockPrefix(line: String): String {
-    // Preserve the leading alignment + direction markers (e.g.
-    // CENTER + RLM + "# text") that may sit in front of the block
-    // prefix — the markers are re-appended after the prefix is stripped
-    // so applying a style keeps the line's alignment and direction.
-    val markers = leadingMarkers(line)
-    var result = stripLeadingMarkers(line)
+private fun stripBlockPrefix(line: String): String =
+    leadingMarkers(line) + stripBlockPrefixes(stripLeadingMarkers(line))
 
-    if (result.startsWith("## ")) result = result.removePrefix("## ")
-    else if (result.startsWith("# ")) result = result.removePrefix("# ")
+
+/**
+ * The line's plain content with every block-level prefix removed —
+ * headings at ANY level (1–6), quote chains, bullets and numbered list
+ * markers. Callers add the leading alignment / direction markers back.
+ */
+private fun stripBlockPrefixes(content: String): String {
+    var result = content
+
+    headingPrefixRegex.find(result)?.takeIf { it.range.first == 0 }?.let { match ->
+        result = result.removeRange(match.range)
+    }
 
     val quoteDepth = result.takeWhile { it == '>' }.length
     if (quoteDepth > 0) {
@@ -204,7 +235,7 @@ private fun stripBlockPrefix(line: String): String {
 
     orderedListRegex.matchAt(result, 0)?.let { result = result.drop(it.value.length) }
 
-    return markers + result
+    return result
 }
 
 

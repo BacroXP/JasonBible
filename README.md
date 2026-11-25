@@ -59,7 +59,7 @@ Upgrade to new versions with `sudo apt upgrade bibleapp`.
 | 📖 Read & study | 📝 Notes & organize |
 |---|---|
 | **90+ translations in 52 languages** — from Luther 1912 to the Greek & Hebrew originals, switchable in Settings | Word-style **ribbon toolbar** with Home / Insert / Layout tabs |
-| **Word study with Strong's numbers** — tap any `G`/`H` number for the definition, root & pronunciation; hover a Hebrew/Greek word to light up every occurrence in the chapter, with the count beside the cursor | Rich formatting: **H1/H2 headings, quotes, highlights, lists, bold / italic / underline** |
+| **Word study with Strong's numbers** — tap any `G`/`H` number for the definition, root & pronunciation; hover a Hebrew/Greek word to light up every occurrence in the chapter, with the count beside the cursor | Rich formatting: **H1–H6 headings, quotes, highlights, lists, bold / italic / underline** |
 | **Interlinear view (ΑΩ)** — matching Greek beneath each verse, or **word-aligned** columns paired by Strong's number | **Media references** — `@youtube:…`, `@spotify:…`, `@url:…` render as chips with an in-app preview panel |
 | **Full-text Bible search (Ctrl+F)** — grouped by book, case/whole-word toggles, scope filter, plus **Strong's reverse concordance** (`G25`, `H1`) | **Global notes search (Ctrl+Shift+F)** — full-text across every note, click-to-open |
 | **Jump to any verse (Ctrl+G)** with book autocomplete, plus ← / → history | **`$Joh` inline autocomplete** — type a book and complete the reference; **hover a reference chip to preview its verses** |
@@ -75,6 +75,7 @@ Upgrade to new versions with `sudo apt upgrade bibleapp`.
 | **v1.0.0** | General — Bible reading & notes | ✅ Released |
 | **v2.0.0** | Media — in-app playback & rich media cards | ✅ Released |
 | **v2.1.0** | Quality of life — rename, hover previews, word-study hover, lean stats, auto-save | ✅ Released |
+| **v2.2.0** | Editor & PDF — all heading levels, marker-free editor, clean PDF export | ✅ Released |
 | **v3.0.0** | Accounts — sync & cloud | 🗓 Planned |
 
 **v1.0.0 — the general app** *(released)*
@@ -101,6 +102,15 @@ glance**, hovering a Hebrew/Greek word **highlights every occurrence in the
 chapter and shows the count** next to the cursor, the editor footer keeps only
 the numbers worth reading (**words · characters**), and notes **auto-save** once
 typing pauses.
+
+**v2.2.0 — editor & PDF** *(released)*
+Word's full heading range is now one click away — **H1 to H6** in the Layout
+ribbon — and the source markup disappears while you write: headings, quotes,
+bullets and numbered lists are drawn as you type (bullet dots and
+auto-incrementing numbers included) with tighter, word-like line spacing.
+**PDF export** now prints the note the way the editor shows it, without the
+`#`, `*`, `-`, `>` and `1.` characters, with real paragraph spacing and a
+**Page N of M footer** on every page.
 
 **v3.0.0 — accounts** *(planned)*
 User accounts with cloud sync for notes, settings and reading progress — so
@@ -155,7 +165,7 @@ them here, e.g.:
 
 | What           | Progress
 |-----           |---------
-| Editor Update  | IN PLANNING
+| Editor Update  | SHIPPED IN v2.2.0
 
 ## 🔗 Links
 

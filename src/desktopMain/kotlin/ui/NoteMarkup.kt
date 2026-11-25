@@ -72,6 +72,19 @@ internal fun stripLeadingMarkers(line: String): String =
         .removePrefix(RLM).removePrefix(LRM)
 
 internal val orderedListRegex = Regex("^\\d+\\.\\s+")
+
+// Markdown heading prefix: one to six `#` followed by whitespace. Levels
+// 1–6 map to Word's Heading 1–6; the editor used to know only `# ` / `## `
+// so every deeper heading showed up as a literal `### …` paragraph.
+internal val headingPrefixRegex = Regex("^#{1,6}\\s+")
+
+/** Heading level (1–6) of [line], or 0 when the line is not a heading. */
+internal fun headingLevelOf(line: String): Int =
+    headingPrefixRegex.find(line)
+        ?.takeIf { it.range.first == 0 }
+        ?.value
+        ?.count { it == '#' }
+        ?: 0
 // Groups: 1 = book, 2 = chapter, 3 = verse, 4 = optional verse-range
 // suffix (`+`, `+N`, `-V2`, `-&C2&V2`, … — resolved by data.parseRange),
 // 5 = optional trailing label. Parts are separated by `&` (or `$` for

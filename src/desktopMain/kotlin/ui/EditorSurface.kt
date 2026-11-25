@@ -401,7 +401,9 @@ internal fun EditorSurface(
                     val base = MaterialTheme.typography.bodyLarge
                     base.copy(
                         fontSize = (base.fontSize.value * fontScale).sp,
-                        lineHeight = (base.lineHeight.value * fontScale).sp,
+                        // ~1.3× instead of bodyLarge's 1.5×: the editor
+                        // used to look double-spaced between lines.
+                        lineHeight = (base.fontSize.value * 1.3f * fontScale).sp,
                         color = MaterialTheme.colorScheme.onSurface,
                         fontFamily = FontFamily.Default
                     )
@@ -428,7 +430,7 @@ internal fun EditorSurface(
                             text = "Write freely. Use the toolbar to add headings, quotes, lists, colors and Bible references.",
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 fontSize = (base.fontSize.value * fontScale).sp,
-                                lineHeight = (base.lineHeight.value * fontScale).sp,
+                                lineHeight = (base.fontSize.value * 1.3f * fontScale).sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                             )
                         )
