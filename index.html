@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#070a10">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="JasonBible — a fast, fully offline Bible reader and note-taking app for Linux, Windows and macOS.">
+  <title>JasonBible — Offline Bible reader &amp; notes</title>
+  <link rel="icon" href="icon.png" type="image/png">
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+  <!--
+    This file is the source of README.md.
+    Regenerate the markdown with:  ./docs/readme/build.sh
+    (build.sh prefixes the local icon path for the root README.)
+  -->
+</head>
+<body>
+
+<div class="hero" align="center">
+  <p class="hero-icon"><img src="icon.png" width="168" height="168" alt="JasonBible icon"></p>
+  <p class="eyebrow">Offline scripture study · Linux · Windows · macOS</p>
+  <h1>Jason<em class="accent">Bible</em></h1>
+  <p class="tagline"><strong>A fast, fully offline Bible reader &amp; note-taking app for Linux, Windows &amp; macOS.</strong></p>
+  <p class="sub">90+ translations · 52 languages · word study with Strong's numbers · rich notes editor</p>
+  <p class="badges">
+    <a href="https://github.com/BacroXP/JasonBible/releases"><img src="https://img.shields.io/github/v/release/BacroXP/JasonBible?label=release&amp;color=informational" alt="Latest release"></a>
+    <a href="https://github.com/BacroXP/JasonBible/actions"><img src="https://github.com/BacroXP/JasonBible/actions/workflows/release.yml/badge.svg" alt="CI — Build &amp; Release"></a>
+    <a href="https://github.com/BacroXP/JasonBible"><img src="https://img.shields.io/github/stars/BacroXP/JasonBible" alt="Stars"></a>
+    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  </p>
+  <p class="nav">
+    <a href="#download">Download</a>
+    <a href="#features">Features</a>
+    <a href="#version-history">Version history</a>
+    <a href="#keyboard-shortcuts">Shortcuts</a>
+    <a href="#build--run">Build &amp; Run</a>
+    <a href="#screenshots">Screenshots</a>
+    <a href="#links">Links</a>
+  </p>
+  <p class="site-link"><a href="https://bacroxp.github.io/JasonBible/">Live site · bacroxp.github.io/JasonBible</a></p>
+</div>
+
+<hr>
+
+<h2 id="download">Download</h2>
+
+<p>Grab the installer for your platform from the
+<strong><a href="https://github.com/BacroXP/JasonBible/releases">Releases</a></strong> page — every release
+ships all three, built automatically by CI on each native OS:</p>
+
+<table>
+  <thead>
+    <tr><th>Platform</th><th>Installer</th><th>Install with</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>🐧 Linux</td>
+      <td><code>.deb</code></td>
+      <td><code>sudo apt install ./bibleapp_&lt;version&gt;_amd64.deb</code> (or the apt repo below)</td>
+    </tr>
+    <tr>
+      <td>🪟 Windows</td>
+      <td><code>.msi</code></td>
+      <td>double-click the installer</td>
+    </tr>
+    <tr>
+      <td>🍎 macOS</td>
+      <td><code>.dmg</code></td>
+      <td>open and drag to <em>Applications</em></td>
+    </tr>
+  </tbody>
+</table>
+
+<blockquote>
+  <p>Installers aren't committed to the repo (they'd exceed GitHub's per-file limit) —
+  they're attached to each release instead. No internet is needed after install:
+  every translation ships inside the app.</p>
+</blockquote>
+
+<h3>Linux — apt repository (recommended)</h3>
+
+<p>Add the BibleApp apt repo once, then install and update like any other package:</p>
+
+<pre><code class="language-bash">echo "deb [trusted=yes] https://github.com/BacroXP/JasonBible/releases/latest/download ./" | sudo tee /etc/apt/sources.list.d/bibleapp.list
+sudo apt update
+sudo apt install bibleapp</code></pre>
+
+<p>Upgrade to new versions with <code>sudo apt upgrade bibleapp</code>.</p>
+
+<blockquote>
+  <p>The repo is <strong>unsigned</strong>, hence the <code>[trusted=yes]</code> flag — packages are still
+  checksum-verified against the index (SHA256). The index and the installer
+  are both served from the GitHub Release download URL — GitHub redirects
+  each file there, so the ~360 MB <code>.deb</code> never has to live in the repo
+  itself. <code>apt update</code> may print a warning about a missing <em>Release</em> file —
+  expected for an unsigned flat repo, harmless.</p>
+</blockquote>
+
+<h2 id="features">Features</h2>
+
+<table>
+  <thead>
+    <tr><th>📖 Read &amp; study</th><th>📝 Notes &amp; organize</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>90+ translations in 52 languages</strong> — from Luther 1912 to the Greek &amp; Hebrew originals, switchable in Settings</td>
+      <td>Word-style <strong>ribbon toolbar</strong> with Home / Insert / Layout tabs</td>
+    </tr>
+    <tr>
+      <td><strong>Word study with Strong's numbers</strong> — tap any <code>G</code>/<code>H</code> number for the definition, root &amp; pronunciation; hover a Hebrew/Greek word to light up every occurrence in the chapter, with the count beside the cursor</td>
+      <td>Rich formatting: <strong>H1–H6 headings, quotes, highlights, lists, bold / italic / underline</strong></td>
+    </tr>
+    <tr>
+      <td><strong>Interlinear view (ΑΩ)</strong> — matching Greek beneath each verse, or <strong>word-aligned</strong> columns paired by Strong's number</td>
+      <td><strong>Media references</strong> — <code>@youtube:…</code>, <code>@spotify:…</code>, <code>@url:…</code> render as chips with an in-app preview panel</td>
+    </tr>
+    <tr>
+      <td><strong>Full-text Bible search (Ctrl+F)</strong> — grouped by book, case/whole-word toggles, scope filter, plus <strong>Strong's reverse concordance</strong> (<code>G25</code>, <code>H1</code>)</td>
+      <td><strong>Global notes search (Ctrl+Shift+F)</strong> — full-text across every note, click-to-open</td>
+    </tr>
+    <tr>
+      <td><strong>Jump to any verse (Ctrl+G)</strong> with book autocomplete, plus ← / → history</td>
+      <td><strong><code>$Joh</code> inline autocomplete</strong> — type a book and complete the reference; <strong>hover a reference chip to preview its verses</strong></td>
+    </tr>
+    <tr>
+      <td>Whole-book <strong>continuous reading</strong> mode</td>
+      <td>Copy verses/ranges, <strong>export chapters &amp; notes to PDF</strong></td>
+    </tr>
+    <tr>
+      <td><strong>365-day reading plan</strong> with progress, plus a daily verse on Home</td>
+      <td>Auto-save to disk · rename notes without editing their first line · undo/redo · find &amp; replace</td>
+    </tr>
+    <tr>
+      <td>Verse highlighting (5 colors), tags, read-tracking &amp; favorites</td>
+      <td>Notes are plain <code>.note</code> files in <code>~/.bibleapp/notes</code></td>
+    </tr>
+    <tr>
+      <td><strong>Split view</strong> — read and take notes side by side</td>
+      <td>Dark / light theme, zoom (75–200 %), sound effects, DE / EN UI</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="version-history">Version history</h2>
+
+<table>
+  <thead>
+    <tr><th>Version</th><th>Focus</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>v1.0.0</strong></td><td>General — Bible reading &amp; notes</td><td>✅ Released</td></tr>
+    <tr><td><strong>v2.0.0</strong></td><td>Media — in-app playback &amp; rich media cards</td><td>✅ Released</td></tr>
+    <tr><td><strong>v2.1.0</strong></td><td>Quality of life — rename, hover previews, word-study hover, lean stats, auto-save</td><td>✅ Released</td></tr>
+    <tr><td><strong>v2.2.0</strong></td><td>Editor &amp; PDF — all heading levels, marker-free editor, clean PDF export</td><td>✅ Released</td></tr>
+    <tr><td><strong>v2.2.1</strong></td><td>Fix — Enter in a numbered list no longer crashes the editor</td><td>🚧 Tagged</td></tr>
+    <tr><td><strong>v3.0.0</strong></td><td>Accounts — sync &amp; cloud</td><td>🗓 Planned</td></tr>
+  </tbody>
+</table>
+
+<p class="release"><strong>v1.0.0 — the general app</strong> <em>released</em><br>
+The core reader &amp; note-taking experience: 90+ offline translations in 52
+languages, word study with Strong's numbers, interlinear / word-aligned
+views, full-text Bible search, the Word-style ribbon notes editor with rich
+formatting, 365-day reading plan, PDF export, split view, highlighting,
+themes and the full shortcut set.</p>
+
+<p class="release"><strong>v2.0.0 — media</strong> <em>in development</em><br>
+Media becomes a first-class citizen of your notes. <code>@youtube:…</code>,
+<code>@spotify:…</code>, <code>@vimeo:…</code>, <code>@soundcloud:…</code>, <code>@url:…</code> and <code>@file:…</code> tokens
+render as rich chips &amp; cards with live titles, thumbnails and progress.
+An <strong>in-app media player</strong> plays YouTube, Vimeo, SoundCloud &amp; local files
+(streams resolved by the bundled yt-dlp) and embeds Spotify — with pause,
+stop and a <strong>loop-forever</strong> toggle. <code>@Phrase</code> autocomplete searches YouTube
+live, and a hover-out media panel docks under the editor for quick access.</p>
+
+<p class="release"><strong>v2.1.0 — quality of life</strong> <em>released</em><br>
+Small things that remove friction: notes can be <strong>renamed without editing their
+first line</strong> (the chosen name is stored separately, so the body stays exactly as
+written), hovering a <code>$Book$C$V</code> reference in the editor shows <strong>its verses at a
+glance</strong>, hovering a Hebrew/Greek word <strong>highlights every occurrence in the
+chapter and shows the count</strong> next to the cursor, the editor footer keeps only
+the numbers worth reading (<strong>words · characters</strong>), and notes <strong>auto-save</strong> once
+typing pauses.</p>
+
+<p class="release"><strong>v2.2.0 — editor &amp; PDF</strong> <em>released</em><br>
+Word's full heading range is now one click away — <strong>H1 to H6</strong> in the Layout
+ribbon — and the source markup disappears while you write: headings, quotes,
+bullets and numbered lists are drawn as you type (bullet dots and
+auto-incrementing numbers included) with tighter, word-like line spacing.
+<strong>PDF export</strong> now prints the note the way the editor shows it, without the
+<code>#</code>, <code>*</code>, <code>-</code>, <code>&gt;</code> and <code>1.</code> characters, with real paragraph spacing and a
+<strong>Page N of M footer</strong> on every page.</p>
+
+<p class="release"><strong>v2.2.1 — editor crash fix</strong> <em>tagged</em><br>
+Pressing <strong>Enter inside a numbered list</strong> could close the note editor with a
+<code>Range [x, y) out of bounds</code> error, which then had to be reopened. The editor
+walked back to the previous numbered line with an off-by-one index; it now
+reads that line correctly, so <code>1. 2. 3. …</code> keeps counting as you type.</p>
+
+<p class="release"><strong>v3.0.0 — accounts</strong> <em>planned</em><br>
+User accounts with cloud sync for notes, settings and reading progress — so
+your library follows you across devices.</p>
+
+<h2 id="keyboard-shortcuts">Keyboard shortcuts</h2>
+
+<table>
+  <thead>
+    <tr><th>Shortcut</th><th>Action</th><th>Shortcut</th><th>Action</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>Ctrl+F</code></td><td>Find — Bible search / in-note find</td><td><code>Ctrl+Shift+F</code></td><td>Global notes search</td></tr>
+    <tr><td><code>Ctrl+H</code></td><td>Find &amp; replace</td><td><code>Ctrl+G</code></td><td>Jump to verse</td></tr>
+    <tr><td><code>Ctrl+K</code></td><td>Insert Bible reference</td><td><code>Ctrl+Shift+K</code></td><td>Insert book reference</td></tr>
+    <tr><td><code>Ctrl+S</code></td><td>Save note</td><td><code>Ctrl+P</code></td><td>Export note to PDF</td></tr>
+    <tr><td><code>Ctrl+Z</code> / <code>Ctrl+Y</code></td><td>Undo / redo</td><td><code>Ctrl+A</code></td><td>Select all</td></tr>
+    <tr><td><code>Ctrl+B</code> / <code>Ctrl+I</code> / <code>Ctrl+U</code></td><td>Bold / italic / underline</td><td><code>Ctrl+←</code> / <code>Ctrl+→</code></td><td>Jump word (add <code>Shift</code> to select)</td></tr>
+    <tr><td><code>Ctrl+W</code></td><td>Back / close</td><td><code>Esc</code></td><td>Close search / find bar</td></tr>
+  </tbody>
+</table>
+
+<h2 id="build--run">Build &amp; Run</h2>
+
+<p>Requires <strong>Java 17+</strong> (JDK).</p>
+
+<pre><code class="language-bash">git clone https://github.com/BacroXP/JasonBible.git
+cd JasonBible
+
+./gradlew run            # run from source
+./gradlew desktopTest    # run the unit tests
+./gradlew packageDeb     # build the Linux .deb (packageDmg / packageMsi on macOS / Windows)</code></pre>
+
+<p>Output lands in <code>build/compose/binaries/main/</code>. Shipping a new version?
+Follow <strong><a href="https://github.com/BacroXP/JasonBible/blob/main/RELEASING.md">RELEASING.md</a></strong> — commit, tag <code>vX.Y.Z</code>, and CI builds &amp;
+attaches all three installers to a new release automatically.</p>
+
+<h2 id="screenshots">Screenshots</h2>
+
+<p class="shots-note"><em>On the way 🚧</em> — real screenshots will land here. To add yours,
+drop them into <code>docs/screenshots/</code> and reference them from this page.</p>
+
+<h2 id="where-things-live">Where things live</h2>
+
+<table>
+  <thead>
+    <tr><th>What</th><th>Where</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Settings</td><td><code>~/.bibleapp/private.json</code></td></tr>
+    <tr><td>Notes</td><td><code>~/.bibleapp/notes/*.note</code></td></tr>
+    <tr><td>Translations</td><td><code>src/desktopMain/resources/bible/</code> (auto-detected on startup)</td></tr>
+  </tbody>
+</table>
+
+<h2 id="what-is-coming">What is coming?</h2>
+
+<table>
+  <thead>
+    <tr><th>What</th><th>Progress</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Editor Update</td><td>SHIPPED IN v2.2.0</td></tr>
+  </tbody>
+</table>
+
+<h2 id="links">Links</h2>
+
+<ul class="links">
+  <li><strong>Releases &amp; installers</strong> — <a href="https://github.com/BacroXP/JasonBible/releases">github.com/BacroXP/JasonBible/releases</a></li>
+  <li><strong>CI pipeline</strong> — <a href="https://github.com/BacroXP/JasonBible/actions">github.com/BacroXP/JasonBible/actions</a></li>
+  <li><strong>Release guide</strong> — <a href="https://github.com/BacroXP/JasonBible/blob/main/RELEASING.md">RELEASING.md</a></li>
+  <li><strong>Tech stack</strong> — <a href="https://kotlinlang.org">Kotlin</a> 2.2 · <a href="https://www.jetbrains.com/lp/compose-multiplatform/">Compose Multiplatform</a> 1.9 (Material 3) · kotlinx-serialization · Apache PDFBox</li>
+</ul>
+
+</body>
+</html>
