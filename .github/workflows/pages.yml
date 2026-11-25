@@ -9,34 +9,40 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
+      - name: Publish site to gh-pages
+        run: |
+          set -euo pipefail
 
-      - name: Upload site
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/readme
+          git fetch origin gh-pages
+          git worktree add --detach site origin/gh-pages
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          cp docs/readme/index.html site/
+          cp docs/readme/style.css site/
+          cp docs/readme/script.js site/
+          cp docs/readme/icon.png site/
+
+          cd site
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html style.css script.js icon.png
+
+          if git diff --cached --quiet; then
+            echo "Site is already up to date."
+            exit 0
+          fi
+
+          git commit -m "Deploy README site"
+          git push origin HEAD:gh-pages
