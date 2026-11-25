@@ -12,6 +12,9 @@ import model.QuoteBlock
 import model.VerseReferenceBlock
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import kotlin.io.path.extension
 import ui.coloredQuoteRegex
 import ui.orderedListRegex
@@ -46,6 +49,111 @@ object NotesRepository {
 
     private fun invalidateNotes() {
         notesCache = null
+    }
+
+
+    // ------------------------------------------------------------------
+    // Display names ("Rename" without rewriting the note's first line)
+    //
+    // Notes normally take their title from the `# ` heading on the first
+    // line, and editing that heading renames the file. That is the right
+    // default for a note written from scratch, but it means the heading is
+    // part of the document. [renameNote] instead stores an explicit
+    // display name (keyed by the note's relative file name) in
+    // `~/.bibleapp/note-titles.json`, so the body — including its first
+    // line — is left byte-for-byte untouched while the sidebar, note chips
+    // and `[[links]]` see the new name.
+    // ------------------------------------------------------------------
+
+    private val noteTitlesPath: Path = Path.of(
+        System.getProperty("user.home"),
+        ".bibleapp",
+        "note-titles.json"
+    )
+
+    private val titleOverridesJson = Json { prettyPrint = true }
+    private val titleOverridesSerializer =
+        MapSerializer(String.serializer(), String.serializer())
+
+    @Volatile
+    private var titleOverridesCache: Map<String, String>? = null
+
+    /** Relative file name → user-chosen display title. Loaded once, cached. */
+    private fun titleOverrides(): Map<String, String> {
+        titleOverridesCache?.let { return it }
+        val loaded = runCatching {
+            if (Files.exists(noteTitlesPath)) {
+                titleOverridesJson.decodeFromString(
+                    titleOverridesSerializer,
+                    Files.readString(noteTitlesPath)
+                )
+            } else {
+                emptyMap()
+            }
+        }.getOrDefault(emptyMap())
+        titleOverridesCache = loaded
+        return loaded
+    }
+
+    private fun updateTitleOverrides(transform: (MutableMap<String, String>) -> Unit) {
+        val overrides = titleOverrides().toMutableMap()
+        transform(overrides)
+        titleOverridesCache = overrides
+        runCatching {
+            Files.createDirectories(noteTitlesPath.parent)
+            Files.writeString(
+                noteTitlesPath,
+                titleOverridesJson.encodeToString(titleOverridesSerializer, overrides)
+            )
+        }
+    }
+
+    /** The display title set by [renameNote] for [fileName], or null when
+     *  the note still uses its `# ` heading / file name. */
+    fun titleOverride(fileName: String): String? =
+        titleOverrides()[fileName]?.takeIf { it.isNotBlank() }
+
+    /**
+     * Renames a note WITHOUT touching its body: the file is moved to a
+     * name derived from [newTitle] and the chosen name is rememberred as
+     * the note's display title, so its `# ` heading (the first line) stays
+     * exactly as written. A name owned by another note gets the usual
+     * `-1`, `-2`, … suffix, so a rename can never overwrite a note.
+     * Returns the note's new relative file name, or null when the note
+     * doesn't exist or [newTitle] is blank.
+     */
+    fun renameNote(fileName: String, newTitle: String): String? {
+        ensureSeeded()
+        val title = newTitle.trim()
+        if (title.isEmpty()) return null
+        val source = notesDir.resolve(fileName)
+        if (!Files.exists(source)) return null
+
+        // Keep the note inside its folder, like saveNote does.
+        val folder = fileName.substringBeforeLast('/', "")
+            .let { if (it == fileName) "" else it }
+        val safeBase = sanitizeFileName(title).ifBlank { "note" }
+        var candidate = if (folder.isEmpty()) "$safeBase.note" else "$folder/$safeBase.note"
+        var counter = 1
+        while (candidate != fileName && Files.exists(notesDir.resolve(candidate))) {
+            candidate = if (folder.isEmpty()) {
+                "$safeBase-$counter.note"
+            } else {
+                "$folder/$safeBase-$counter.note"
+            }
+            counter++
+        }
+
+        if (candidate != fileName) {
+            val target = notesDir.resolve(candidate)
+            runCatching { Files.move(source, target) }.getOrElse { return null }
+        }
+        updateTitleOverrides { overrides ->
+            overrides.remove(fileName)
+            overrides[candidate] = title
+        }
+        invalidateNotes()
+        return candidate
     }
 
 
@@ -86,6 +194,13 @@ object NotesRepository {
      */
     fun saveNote(originalFileName: String?, content: String): ParsedNote {
         ensureSeeded()
+
+        // A note renamed via `renameNote` owns an explicit display name:
+        // editing its `# ` heading must not silently undo the rename by
+        // dragging the file back to the heading's name.
+        if (!originalFileName.isNullOrBlank() && titleOverride(originalFileName) != null) {
+            return saveNoteInPlace(originalFileName, content)
+        }
 
         val parsedTitle = extractTitle(content)
         val safeBase = sanitizeFileName(parsedTitle.ifBlank { "note" })
@@ -163,7 +278,10 @@ object NotesRepository {
         } else {
             false
         }
-        if (deleted) invalidateNotes()
+        if (deleted) {
+            updateTitleOverrides { it.remove(fileName) }
+            invalidateNotes()
+        }
         return deleted
     }
 
@@ -541,8 +659,12 @@ object NotesRepository {
             }
         }
 
+        // A user-assigned display name wins over the `# ` heading; the
+        // heading itself is left untouched in the body.
+        val displayTitle = titleOverrides()[fileName]?.takeIf { it.isNotBlank() } ?: title
+
         return ParsedNote(
-            title = title,
+            title = displayTitle,
             fileName = fileName,
             content = content,
             blocks = blocks,
@@ -714,7 +836,24 @@ object NotesRepository {
         val source = notesDir.resolve(oldName)
         val target = notesDir.resolve(newName)
         if (!Files.isDirectory(source) || Files.exists(target)) return false
-        return runCatching { Files.move(source, target); true }.getOrDefault(false)
+        val moved = runCatching { Files.move(source, target); true }.getOrDefault(false)
+        if (moved) {
+            // Display names are keyed by relative path, so renaming a
+            // folder must re-point the notes inside it.
+            updateTitleOverrides { overrides ->
+                val updated = overrides.mapKeys { (name, _) ->
+                    if (name.startsWith("$oldName/")) {
+                        "$newName/${name.substringAfter('/')}"
+                    } else {
+                        name
+                    }
+                }
+                overrides.clear()
+                overrides.putAll(updated)
+            }
+            invalidateNotes()
+        }
+        return moved
     }
 
     /** Delete a folder (only when EMPTY — notes must be moved first). */
@@ -755,6 +894,10 @@ object NotesRepository {
         return runCatching {
             Files.createDirectories(target.parent)
             Files.move(source, target)
+            // A moved note keeps its custom display name.
+            updateTitleOverrides { overrides ->
+                overrides.remove(fileName)?.let { overrides[candidate] = it }
+            }
             invalidateNotes()
             candidate
         }.getOrNull()

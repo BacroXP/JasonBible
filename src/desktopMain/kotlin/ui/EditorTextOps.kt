@@ -53,23 +53,20 @@ internal fun wordBoundsAt(text: String, pos: Int): IntRange {
     return s until e
 }
 
-// Text-stats payload shown in the editor footer ("words · chars · …").
+// Text-stats payload shown in the editor footer. Deliberately limited to
+// the two numbers a writer actually acts on — word count and character
+// count. Derived trivia (lines, characters without spaces, estimated
+// reading time) was dropped: it changed on every keystroke without ever
+// telling the user anything useful.
 internal data class TextStats(
     val words: Int,
-    val chars: Int,
-    val charsNoSpaces: Int,
-    val lines: Int,
-    val readingMinutes: Int
+    val chars: Int
 )
 internal fun computeTextStats(text: String): TextStats {
-    if (text.isEmpty()) return TextStats(0, 0, 0, 0, 0)
+    if (text.isEmpty()) return TextStats(0, 0)
     val trimmed = text.trim()
     val words = if (trimmed.isEmpty()) 0 else trimmed.split(Regex("\\s+")).size
-    val chars = text.length
-    val charsNoSpaces = text.count { !it.isWhitespace() }
-    val lines = text.count { it == '\n' } + 1
-    val readingMinutes = if (words == 0) 0 else ((words + 199) / 200).coerceAtLeast(1)
-    return TextStats(words, chars, charsNoSpaces, lines, readingMinutes)
+    return TextStats(words, text.length)
 }
 
 // ---------------------------------------------------------------------------

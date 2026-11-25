@@ -296,7 +296,13 @@ internal fun VerseRow(
     // English word sharing their G-number instead of showing a plain
     // Greek line. Verses without tokens on either side fall back to the
     // plain line.
-    interlinearAligned: Boolean = false
+    interlinearAligned: Boolean = false,
+    // Chapter-wide word hover: a Strong's number hovered on ANY verse of
+    // the chapter tints every occurrence of that word in the chapter; the
+    // per-number occurrence counts come from the chapter.
+    wordCountsInChapter: Map<String, Int> = emptyMap(),
+    hoveredWordNumber: String? = null,
+    onHoverWord: (String?) -> Unit = {}
 ) {
     var hovered by remember(bookNumber, chapterNumber, verseNumber) {
         mutableStateOf(false)
@@ -434,7 +440,11 @@ internal fun VerseRow(
                                 text = text,
                                 tokens = strongsTokens,
                                 activeNumber = activeForThisVerse?.number,
-                                onToggle = toggleStudyWord
+                                onToggle = toggleStudyWord,
+                                hoverNumber = hoveredWordNumber,
+                                hoverCount = hoveredWordNumber
+                                    ?.let { wordCountsInChapter[it] } ?: 0,
+                                onHoverWord = onHoverWord
                             )
                         }
 
@@ -450,7 +460,11 @@ internal fun VerseRow(
                                 greekText = greekText,
                                 aligned = interlinearAligned,
                                 activeNumber = activeForThisVerse?.number,
-                                onToggleStudyWord = toggleStudyWord
+                                onToggleStudyWord = toggleStudyWord,
+                                hoverNumber = hoveredWordNumber,
+                                hoverCount = hoveredWordNumber
+                                    ?.let { wordCountsInChapter[it] } ?: 0,
+                                onHoverWord = onHoverWord
                             )
                         }
 
@@ -922,7 +936,10 @@ internal fun responsiveColumns(
 private fun InterlinearGreekLine(
     greekText: String,
     activeNumber: String?,
-    onToggleStudyWord: (StrongsToken) -> Unit
+    onToggleStudyWord: (StrongsToken) -> Unit,
+    hoverNumber: String? = null,
+    hoverCount: Int = 0,
+    onHoverWord: (String?) -> Unit = {}
 ) {
     val tokens = remember(greekText) { parseWordStudyTokens(greekText) }
     Surface(
@@ -953,7 +970,10 @@ private fun InterlinearGreekLine(
                     text = greekText,
                     tokens = tokens,
                     activeNumber = activeNumber,
-                    onToggle = onToggleStudyWord
+                    onToggle = onToggleStudyWord,
+                    hoverNumber = hoverNumber,
+                    hoverCount = hoverCount,
+                    onHoverWord = onHoverWord
                 )
             }
         }
@@ -1061,7 +1081,10 @@ internal fun VerseInterlinear(
     greekText: String,
     aligned: Boolean,
     activeNumber: String?,
-    onToggleStudyWord: (StrongsToken) -> Unit
+    onToggleStudyWord: (StrongsToken) -> Unit,
+    hoverNumber: String? = null,
+    hoverCount: Int = 0,
+    onHoverWord: (String?) -> Unit = {}
 ) {
     val englishTokens = remember(englishText) { parseStrongsTokens(englishText) }
     val greekTokens = remember(greekText) { parseParsedTokens(greekText) }
@@ -1076,7 +1099,10 @@ internal fun VerseInterlinear(
         InterlinearGreekLine(
             greekText = greekText,
             activeNumber = activeNumber,
-            onToggleStudyWord = onToggleStudyWord
+            onToggleStudyWord = onToggleStudyWord,
+            hoverNumber = hoverNumber,
+            hoverCount = hoverCount,
+            onHoverWord = onHoverWord
         )
     }
 }

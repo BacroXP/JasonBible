@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import data.BibleCatalog
 import data.BibleRepository
 import data.MediaFileKind
 import data.MediaReferenceToken
@@ -131,6 +132,14 @@ private val DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 // cheap name|mtime|size fingerprints, so notes are only re-parsed when
 // something actually changed.
 private const val NOTES_POLL_INTERVAL_MS = 1000L
+
+// Auto-save idle delay: once typing pauses for this long the open note is
+// written to disk, so Ctrl+S becomes optional.
+private const val AUTO_SAVE_IDLE_MS = 1500L
+
+// How many leading verses a chapter-level reference preview shows on
+// hover (single-verse references always show exactly that verse).
+private const val HOVER_PREVIEW_VERSES = 3
 
 // Editor zoom range — sourced from SettingsManager so the footer slider,
 // setFontScale and the persisted clamp all share one definition.
@@ -278,6 +287,17 @@ fun NotesScreen(
     // extended reference chip (`$Book$C$V-7`) is open. Holds the
     // reference, the resolved verse list and the chip's window anchor.
     var versePicker by remember { mutableStateOf<VersePickerState?>(null) }
+    // Reference hover preview: the reference under the pointer plus the
+    // pointer's window anchor, and its resolved verse text.
+    var verseHover by remember { mutableStateOf<VerseHoverState?>(null) }
+    var verseHoverText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(verseHover?.selection) {
+        val selection = verseHover?.selection
+        verseHoverText = if (selection == null) null else loadVerseHoverPreview(selection)
+    }
+    // Rename dialog target. Renaming changes the note's DISPLAY name only:
+    // the note body (including its first line) is never rewritten.
+    var renameCandidate by remember { mutableStateOf<ParsedNote?>(null) }
     var editorValue by remember { mutableStateOf(TextFieldValue("")) }
     var saving by remember { mutableStateOf(false) }
 
@@ -491,6 +511,29 @@ fun NotesScreen(
             undoManager.reset()
             undoManager.recordChange(initial, initial)
         }
+    }
+
+    /**
+     * Auto-save: once typing pauses for [AUTO_SAVE_IDLE_MS], the open note
+     * is written to disk in place (no rename, so editing the `# ` heading
+     * can never move the file out from under the user mid-typing). The
+     * on-disk content is compared first, so opening / switching notes never
+     * rewrites a file — only a real edit reaches the disk.
+     */
+    LaunchedEffect(editorValue.text, selectedNote?.fileName) {
+        val name = selectedNote?.fileName ?: return@LaunchedEffect
+        // Wait until the editor actually holds THIS note's content: while a
+        // note switch is still in flight the previous note's text is
+        // mounted and must never be written into the new note's file.
+        if (selectedKey != name) return@LaunchedEffect
+        val text = editorValue.text
+        if (text.isBlank()) return@LaunchedEffect
+        delay(AUTO_SAVE_IDLE_MS)
+        val onDisk = NotesRepository.loadNote(name)?.content?.trimEnd()
+        if (onDisk == text.trimEnd()) return@LaunchedEffect
+        NotesRepository.saveNoteInPlace(name, text)
+        notes = NotesRepository.listFiles()
+        saveBanner = "Auto-saved ${name.substringAfterLast('/')}"
     }
 
     // Cross-screen "land me on this verse" effect.
@@ -1304,6 +1347,7 @@ fun NotesScreen(
                                                         }
                                                     },
                                                     onDelete = { deleteCandidate = note },
+                                                    onRename = { renameCandidate = note },
                                                     onMove = {
                                                         folderDialog = FolderDialogMode.Move(
                                                             note.fileName,
@@ -1455,6 +1499,7 @@ fun NotesScreen(
                             onSave = { doSave() },
                             onExport = { doExport() },
                             onNew = { doCreateNote() },
+                            onRename = { renameCandidate = selectedNote },
                             onDelete = { deleteCandidate = selectedNote },
                             onBack = if (showBackButton) {
                                 { doBack() }
@@ -1659,6 +1704,16 @@ fun NotesScreen(
                             },
                             onHoverBibleReference = { ref ->
                                 onHoverBibleReference(ref)
+                            },
+                            onHoverBibleReferenceAt = { ref, anchor ->
+                                // Only re-anchor when the reference under the
+                                // pointer actually changes, so moving along
+                                // one chip doesn't recompose on every frame.
+                                if (ref == null) {
+                                    verseHover = null
+                                } else if (verseHover?.selection != ref) {
+                                    verseHover = VerseHoverState(ref, anchor)
+                                }
                             },
                             onWordSelect = { start, end ->
                                 // Double-click word selection. Routed
@@ -2042,6 +2097,55 @@ fun NotesScreen(
                         }
                         notes = NotesRepository.listFiles()
                         folderDialog = null
+                    }
+                )
+            }
+
+            // Reference hover preview: a small, non-focusable card next to
+            // the pointer showing the verse(s) a `$Book$C$V` chip points at.
+            // Non-focusable so it never steals the pointer from the editor;
+            // offset away from the cursor so it cannot sit under it (which
+            // would make the hover flicker).
+            verseHover?.let { hover ->
+                verseHoverText?.let { previewText ->
+                    Popup(
+                        popupPositionProvider = remember(hover.anchorWindow) {
+                            MediaPreviewPositionProvider(
+                                IntOffset(
+                                    hover.anchorWindow.x.roundToInt() + 18,
+                                    hover.anchorWindow.y.roundToInt() + 20
+                                )
+                            )
+                        },
+                        onDismissRequest = {},
+                        properties = PopupProperties(focusable = false)
+                    ) {
+                        VerseHoverPreviewCard(
+                            label = referenceLabel(hover.selection),
+                            text = previewText
+                        )
+                    }
+                }
+            }
+
+            // Rename dialog (display name only — the note's first line and
+            // the rest of its body stay untouched).
+            renameCandidate?.let { note ->
+                RenameNoteDialog(
+                    note = note,
+                    onDismiss = { renameCandidate = null },
+                    onConfirm = { value ->
+                        val newName = NotesRepository.renameNote(note.fileName, value)
+                        if (newName == null) {
+                            saveBanner = "Could not rename note."
+                        } else {
+                            if (selectedFileNameState == note.fileName) {
+                                selectedFileNameState = newName
+                            }
+                            saveBanner = "Renamed to \"${value.trim()}\" (body unchanged)."
+                        }
+                        notes = NotesRepository.listFiles()
+                        renameCandidate = null
                     }
                 )
             }
@@ -2780,6 +2884,137 @@ private fun FolderDialog(
                 ) {
                     Text("OK")
                 }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+
+// ---------------------------------------------------------------------------
+// Reference hover preview (verses at a glance)
+// ---------------------------------------------------------------------------
+
+/** The reference under the pointer plus its WINDOW-px anchor. */
+private data class VerseHoverState(
+    val selection: BibleReferenceSelection,
+    val anchorWindow: Offset
+)
+
+
+/** Short human label for a reference, e.g. `John 3:16` / `John 3` / `John`. */
+private fun referenceLabel(selection: BibleReferenceSelection): String = buildString {
+    append(selection.book)
+    selection.chapter?.let { chapter ->
+        append(' ')
+        append(chapter)
+    }
+    selection.verse?.let { verse ->
+        append(':')
+        append(verse)
+    }
+}
+
+
+/**
+ * Resolves the text shown in the reference-hover preview. Uses the books
+ * the Bible pane has already parsed when available, so hovering never
+ * blocks on a full parse; a verse reference shows that verse, a chapter
+ * reference its first few verses. Returns null when the reference can't be
+ * resolved (missing book / verse), in which case no preview is shown.
+ */
+private suspend fun loadVerseHoverPreview(selection: BibleReferenceSelection): String? {
+    val chapterNumber = selection.chapter ?: return null
+    val books = BibleRepository.cachedBooks() ?: BibleRepository.loadBooks()
+    val book = books.firstOrNull { it.name.equals(selection.book, ignoreCase = true) }
+        ?: BibleCatalog.nameToBookNumber[selection.book.trim().lowercase()]
+            ?.let { number -> books.firstOrNull { it.book == number } }
+        ?: return null
+    val chapter = book.chapters.firstOrNull { it.chapter == chapterNumber } ?: return null
+    val verseNumber = selection.verse
+    val verses = if (verseNumber != null) {
+        chapter.verses.filter { it.verse == verseNumber }
+    } else {
+        chapter.verses.take(HOVER_PREVIEW_VERSES)
+    }
+    if (verses.isEmpty()) return null
+    return verses.joinToString("\n") { verse ->
+        "${verse.verse}. ${stripWordStudyMarkup(verse.text).trim()}"
+    }
+}
+
+
+/** The hover card itself: the reference label plus the verse text. */
+@Composable
+private fun VerseHoverPreviewCard(label: String, text: String) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        tonalElevation = 6.dp,
+        modifier = Modifier.widthIn(min = 220.dp, max = 420.dp)
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 12,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+
+/**
+ * Rename dialog: changes the note's display name (and its file name)
+ * WITHOUT rewriting the note body — the `# ` heading on the first line
+ * stays exactly as the user wrote it.
+ */
+@Composable
+private fun RenameNoteDialog(
+    note: ParsedNote,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var name by remember(note.fileName) {
+        mutableStateOf(note.title.ifBlank { note.fileName })
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename note") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Note name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "Only the name changes \u2014 the note's first line stays as written.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank(),
+                onClick = { onConfirm(name.trim()) }
+            ) {
+                Text("Rename")
             }
         },
         dismissButton = {

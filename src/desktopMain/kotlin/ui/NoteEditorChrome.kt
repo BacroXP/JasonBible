@@ -54,7 +54,9 @@ internal fun EditorHeader(
     onExport: () -> Unit,
     onNew: (() -> Unit)?,
     onDelete: (() -> Unit)?,
-    onBack: (() -> Unit)?
+    onBack: (() -> Unit)?,
+    /** Renames the note without touching its first line. */
+    onRename: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -76,6 +78,18 @@ internal fun EditorHeader(
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (onRename != null) {
+                ToolbarTip(label = "Rename note (keeps the first line)") {
+                    Button(onClick = onRename) {
+                        Icon(
+                            RibbonIcons.Edit,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text("Rename", modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+            }
             if (onBack != null) {
                 ToolbarTip(label = "Back to previous screen", shortcut = "Ctrl+W") {
                     Button(onClick = onBack) {
@@ -144,14 +158,8 @@ internal fun EditorFooter(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = if (stats.words == 0) {
-                "${stats.chars} chars  \u00B7  ${stats.lines} lines"
-            } else {
-                "${stats.words} \u00B7 ${stats.chars} chars" +
-                    "\u00B7 ${stats.charsNoSpaces} no-space" +
-                    "\u00B7 ${stats.lines} ln" +
-                    "\u00B7 ~${stats.readingMinutes} min"
-            },
+            text = "${stats.words} ${if (stats.words == 1) "word" else "words"}" +
+                "  \u00B7  ${stats.chars} chars",
             style = MaterialTheme.typography.bodySmall,
             color = onSurface,
             maxLines = 1,
@@ -276,7 +284,9 @@ internal fun NoteFileCard(
     onClick: () -> Unit,
     onDelete: (() -> Unit)? = null,
     /** Move the note to another folder (revealed on hover). */
-    onMove: (() -> Unit)? = null
+    onMove: (() -> Unit)? = null,
+    /** Rename the note without rewriting its first line (revealed on hover). */
+    onRename: (() -> Unit)? = null
 ) {
     val hoverSource = remember { MutableInteractionSource() }
     val isHovered by hoverSource.collectIsHoveredAsState()
@@ -309,6 +319,22 @@ internal fun NoteFileCard(
                     maxLines = 1,
                     modifier = Modifier.weight(1f)
                 )
+                // Quick rename affordance, revealed on hover. Opens the
+                // rename dialog, which changes the note's display name
+                // WITHOUT rewriting the `# ` heading in the note body.
+                if (isHovered && onRename != null) {
+                    Text(
+                        text = "\u270E",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .clickable {
+                                SoundManager.play(SoundEvent.Click)
+                                onRename()
+                            }
+                    )
+                }
                 // Quick move-to-folder affordance, revealed on hover.
                 if (isHovered && onMove != null) {
                     Text(
