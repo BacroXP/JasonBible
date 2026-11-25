@@ -416,6 +416,40 @@ data class MediaPreviewInfo(
 )
 
 
+/** Session cache for fetched previews, mirroring [MediaTitleCache]: the
+ *  editor chips, the media panel, the preview popup and the PDF exporter
+ *  all want the same title / author, so a preview fetched by one of them
+ *  is served to the others without another network round-trip. Failed
+ *  fetches are cached as null too, so an offline / dead link isn't
+ *  retried on every request. LRU-capped like the other caches. */
+internal object MediaPreviewInfoCache {
+    private const val MAX_ENTRIES = 128
+
+    private val cache = object : LinkedHashMap<String, MediaPreviewInfo?>(32, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, MediaPreviewInfo?>
+        ): Boolean = size > MAX_ENTRIES
+    }
+
+    @Synchronized
+    fun get(url: String): MediaPreviewInfo? = cache[url]
+
+    /** True when the URL has a cache entry (even a failed-fetch null). */
+    @Synchronized
+    fun isCached(url: String): Boolean = cache.containsKey(url)
+
+    @Synchronized
+    fun put(url: String, info: MediaPreviewInfo?) {
+        cache[url] = info
+    }
+
+    @Synchronized
+    internal fun clearForTests() {
+        cache.clear()
+    }
+}
+
+
 /**
  * Read an input stream up to [maxBytes], stopping early once the cap is
  * reached. Shared by the oEmbed fetch and the thumbnail fetch so neither
@@ -459,6 +493,19 @@ object MediaPreviewFetcher {
 
     suspend fun fetch(token: MediaReferenceToken): MediaPreviewInfo? {
         val url = token.resolveUrl() ?: return null
+        // Session cache: serve a preview already fetched for the editor,
+        // the media panel or the preview popup instead of re-requesting it.
+        if (MediaPreviewInfoCache.isCached(url)) return MediaPreviewInfoCache.get(url)
+        val info = fetchUncached(token, url)
+        MediaPreviewInfoCache.put(url, info)
+        return info
+    }
+
+    /** The network part of [fetch]; null on any failure. */
+    private suspend fun fetchUncached(
+        token: MediaReferenceToken,
+        url: String
+    ): MediaPreviewInfo? {
         val endpoint = token.service.oEmbedUrl(url) ?: return null
         return withContext(Dispatchers.IO) {
             val info = runCatching {
@@ -1073,6 +1120,37 @@ suspend fun fetchMediaTitle(token: MediaReferenceToken): String? {
     }
     MediaTitleCache.put(url, title)
     return title
+}
+
+
+/**
+ * Display label for a media token in PRINTED output: the media's title
+ * plus its author ("Never Gonna Give You Up — Rick Astley"), the scraped
+ * name for channels / artists, the file name for local media files, and
+ * the domain for generic links. Reads the session caches ONLY — it never
+ * touches the network (the notes screen pre-fetches the previews before
+ * exporting) — and returns null when nothing better than
+ * [MediaReferenceToken.chipText] is known.
+ */
+fun mediaDisplayLabel(token: MediaReferenceToken): String? {
+    // Local files have no metadata title — the file name is the label.
+    if (token.service == MediaService.FILE) {
+        return token.content.substringAfterLast('/').ifBlank { null }
+    }
+    val url = token.resolveUrl() ?: return null
+    // A bare link has no title; its domain is the meaningful name.
+    if (token.service == MediaService.LINK) return domainOf(url)
+    val info = MediaPreviewInfoCache.get(url)
+    val title = (
+        if (token.isProfile) ProfileInfoCache.get(url)?.name else info?.title
+    )?.trim()?.takeIf { it.isNotEmpty() }
+        ?: MediaTitleCache.get(url)?.trim()?.takeIf { it.isNotEmpty() }
+    val author = if (token.isProfile) {
+        null
+    } else {
+        info?.author?.trim()?.takeIf { it.isNotEmpty() }
+    }
+    return if (title != null && author != null) "$title — $author" else title
 }
 
 

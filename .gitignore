@@ -3,6 +3,14 @@
 build/
 out/
 
+# Android SDK location for the phone app build (machine-specific)
+mobile/local.properties
+
+# Android release signing material — never commit these
+mobile/keystore.properties
+*.keystore
+*.jks
+
 # IntelliJ IDEA
 .idea/
 *.iml

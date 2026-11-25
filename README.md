@@ -2,181 +2,204 @@
 
 <img src="src/desktopMain/resources/icons/Icon-512.png" width="110" alt="BibleApp icon"/>
 
-# JasonBible
+# JasonBible — Phone
 
-**A fast, fully offline Bible reader & note-taking app for Linux, Windows & macOS.**
+**A fully offline Bible reader & note-taking app for Android.**
 
-90+ translations · 52 languages · word study with Strong's numbers · rich notes editor
+Files · Editor · Bible, one swipe apart · offline translations · notes that save themselves
 
 [![Latest release](https://img.shields.io/github/v/release/BacroXP/JasonBible?label=release&color=informational)](https://github.com/BacroXP/JasonBible/releases)
-[![CI — Build & Release](https://github.com/BacroXP/JasonBible/actions/workflows/release.yml/badge.svg)](https://github.com/BacroXP/JasonBible/actions)
-[![Stars](https://img.shields.io/github/stars/BacroXP/JasonBible)](https://github.com/BacroXP/JasonBible)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**[⬇️ Download](#download)** · **[✨ Features](#features)** · **[🗺 Version history](#-version-history)** · **[⌨️ Shortcuts](#keyboard-shortcuts)** · **[🚀 Build & Run](#build--run)** · **[📸 Screenshots](#screenshots)** · **[🔗 Links](#links)**
+**[📱 Phone layout](#-phone-layout)** · **[⬇️ Install on Android](#-install-on-android)** · **[🍎 iPhone](#-iphone)** · **[🚀 Build](#-build-the-apk)** · **[✨ What's in the app](#-whats-in-the-phone-app)**
 
 </div>
 
 ---
 
-## ⬇️ Download
+## 📱 Phone layout
 
-Grab the installer for your platform from the
-**[Releases](https://github.com/BacroXP/JasonBible/releases)** page — every release
-ships all three, built automatically by CI on each native OS:
+The phone layout is a horizontal strip of three pages:
 
-| Platform | Installer | Install with |
-|----------|-----------|--------------|
-| 🐧 Linux | `.deb` | `sudo apt install ./bibleapp_<version>_amd64.deb` (or the apt repo below) |
-| 🪟 Windows | `.msi` | double-click the installer |
-| 🍎 macOS | `.dmg` | open and drag to *Applications* |
-
-> Installers aren't committed to the repo (they'd exceed GitHub's per-file limit) —
-> they're attached to each release instead. No internet is needed after install:
-> every translation ships inside the app.
-
-### 🐧 Linux — apt repository (recommended)
-
-Add the BibleApp apt repo once, then install and update like any other package:
-
-```bash
-echo "deb [trusted=yes] https://github.com/BacroXP/JasonBible/releases/latest/download ./" | sudo tee /etc/apt/sources.list.d/bibleapp.list
-sudo apt update
-sudo apt install bibleapp
+```
+  swipe  ←──────────────  ──────────────→
+  ┌──────────┬──────────┬──────────┐
+  │  Files   │  Editor  │  Bible   │
+  └──────────┴──────────┴──────────┘
 ```
 
-Upgrade to new versions with `sudo apt upgrade bibleapp`.
+- **The editor sits between the files and the Bible.** Swiping **right on the
+  editor** opens the files (there is no page further left), swiping **left**
+  moves to the Bible. Swiping back is symmetric.
+- **Tabs** (`Files` · `Editor` · `Bible`) in the top bar do the same without
+  swiping.
+- **Notes never lose a draft.** The editor text lives above the pager, so
+  switching to the Bible and back keeps what you typed; notes auto-save after
+  a short pause.
+- **Files page** lists every note, creates new ones, and deletes them.
+- **Bible page** has a book picker, chapter chips, verse reading, translation
+  switching (KJV / Luther 1912) and prev/next chapter buttons.
 
-> The repo is **unsigned**, hence the `[trusted=yes]` flag — packages are still
-> checksum-verified against the index (SHA256). The index and the installer
-> are both served from the GitHub Release download URL — GitHub redirects
-> each file there, so the ~360 MB `.deb` never has to live in the repo
-> itself. `apt update` may print a warning about a missing *Release* file —
-> expected for an unsigned flat repo, harmless.
+The same layout exists in the desktop build of this branch (`navigation/PhoneShell.kt`)
+for previewing on a computer.
 
-## ✨ Features
+## ⬇️ Install on Android
 
-| 📖 Read & study | 📝 Notes & organize |
+Minimum: **Android 8.0** (API 26). Works offline; no account and no network
+permission.
+
+### Option 1 — copy the APK to your phone
+
+1. Download **`dist/JasonBible-phone.apk`** from this repository (or from the
+   release page) onto your phone — USB, cloud drive or email.
+2. Tap the file in your file manager / Downloads.
+3. Android asks to allow installing unknown apps for that app (Files, Chrome,
+   …): allow it, then tap **Install**.
+4. Open **JasonBible** from the app drawer.
+
+### Option 2 — install over USB with `adb`
+
+```bash
+adb install -r dist/JasonBible-phone.apk
+adb shell am start -n com.jasonbible.phone/.MainActivity
+```
+
+The APK is a **debug-signed** build, so Android may show the usual
+"unknown developer" prompt; that is expected for a self-built app.
+
+## 🍎 iPhone
+
+There is **no iPhone build**. An iOS app needs a Kotlin/Native + Compose
+Multiplatform iOS target compiled with Xcode on macOS, plus an Apple
+developer account for signing — none of which exists on this branch or can
+be produced from Linux. Android is the supported phone platform here.
+
+## 🚀 Build the APK
+
+Requirements: **JDK 21** and the **Android SDK** (platform 35 + build-tools
+35.0.0). The mobile build is a standalone Gradle project under `mobile/`.
+
+```bash
+cd mobile
+
+# once, if the SDK is not in the default location:
+echo "sdk.dir=/path/to/android-sdk" > local.properties
+
+./gradlew assembleDebug
+```
+
+The APK lands at `mobile/app/build/outputs/apk/debug/app-debug.apk`.
+The build from this branch is included at `dist/JasonBible-phone.apk` for
+download.
+
+Bundled translations live in `mobile/app/src/main/assets/bible/` (copy any
+SWORD-format module from `src/desktopMain/resources/bible/` there and add it
+to `TRANSLATIONS` in `Bible.kt`).
+
+### 🔐 Release signing
+
+Release builds read the keystore from **`mobile/keystore.properties`** (never
+committed — it is in `.gitignore`) or from env vars, which CI uses:
+
+| Property / env var | Meaning |
 |---|---|
-| **90+ translations in 52 languages** — from Luther 1912 to the Greek & Hebrew originals, switchable in Settings | Word-style **ribbon toolbar** with Home / Insert / Layout tabs |
-| **Word study with Strong's numbers** — tap any `G`/`H` number for the definition, root & pronunciation; hover a Hebrew/Greek word to light up every occurrence in the chapter, with the count beside the cursor | Rich formatting: **H1–H6 headings, quotes, highlights, lists, bold / italic / underline** |
-| **Interlinear view (ΑΩ)** — matching Greek beneath each verse, or **word-aligned** columns paired by Strong's number | **Media references** — `@youtube:…`, `@spotify:…`, `@url:…` render as chips with an in-app preview panel |
-| **Full-text Bible search (Ctrl+F)** — grouped by book, case/whole-word toggles, scope filter, plus **Strong's reverse concordance** (`G25`, `H1`) | **Global notes search (Ctrl+Shift+F)** — full-text across every note, click-to-open |
-| **Jump to any verse (Ctrl+G)** with book autocomplete, plus ← / → history | **`$Joh` inline autocomplete** — type a book and complete the reference; **hover a reference chip to preview its verses** |
-| Whole-book **continuous reading** mode | Copy verses/ranges, **export chapters & notes to PDF** |
-| **365-day reading plan** with progress, plus a daily verse on Home | Auto-save to disk · rename notes without editing their first line · undo/redo · find & replace |
-| Verse highlighting (5 colors), tags, read-tracking & favorites | Notes are plain `.note` files in `~/.bibleapp/notes` |
-| **Split view** — read and take notes side by side | Dark / light theme, zoom (75–200 %), sound effects, DE / EN UI |
+| `storeFile` / `ANDROID_KEYSTORE_FILE` | path to the `.keystore` / `.jks` |
+| `storePassword` / `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `keyAlias` / `ANDROID_KEY_ALIAS` | signing key alias |
+| `keyPassword` / `ANDROID_KEY_PASSWORD` | key password |
 
-## 🗺 Version history
-
-| Version | Focus | Status |
-|---------|-------|--------|
-| **v1.0.0** | General — Bible reading & notes | ✅ Released |
-| **v2.0.0** | Media — in-app playback & rich media cards | ✅ Released |
-| **v2.1.0** | Quality of life — rename, hover previews, word-study hover, lean stats, auto-save | ✅ Released |
-| **v2.2.0** | Editor & PDF — all heading levels, marker-free editor, clean PDF export | ✅ Released |
-| **v2.2.1** | Fix — Enter in a numbered list no longer crashes the editor | 🚧 Tagged |
-| **v3.0.0** | Accounts — sync & cloud | 🗓 Planned |
-
-**v1.0.0 — the general app** *(released)*
-The core reader & note-taking experience: 90+ offline translations in 52
-languages, word study with Strong's numbers, interlinear / word-aligned
-views, full-text Bible search, the Word-style ribbon notes editor with rich
-formatting, 365-day reading plan, PDF export, split view, highlighting,
-themes and the full shortcut set.
-
-**v2.0.0 — media** *(in development)*
-Media becomes a first-class citizen of your notes. `@youtube:…`,
-`@spotify:…`, `@vimeo:…`, `@soundcloud:…`, `@url:…` and `@file:…` tokens
-render as rich chips & cards with live titles, thumbnails and progress.
-An **in-app media player** plays YouTube, Vimeo, SoundCloud & local files
-(streams resolved by the bundled yt-dlp) and embeds Spotify — with pause,
-stop and a **loop-forever** toggle. `@Phrase` autocomplete searches YouTube
-live, and a hover-out media panel docks under the editor for quick access.
-
-**v2.1.0 — quality of life** *(released)*
-Small things that remove friction: notes can be **renamed without editing their
-first line** (the chosen name is stored separately, so the body stays exactly as
-written), hovering a `$Book$C$V` reference in the editor shows **its verses at a
-glance**, hovering a Hebrew/Greek word **highlights every occurrence in the
-chapter and shows the count** next to the cursor, the editor footer keeps only
-the numbers worth reading (**words · characters**), and notes **auto-save** once
-typing pauses.
-
-**v2.2.0 — editor & PDF** *(released)*
-Word's full heading range is now one click away — **H1 to H6** in the Layout
-ribbon — and the source markup disappears while you write: headings, quotes,
-bullets and numbered lists are drawn as you type (bullet dots and
-auto-incrementing numbers included) with tighter, word-like line spacing.
-**PDF export** now prints the note the way the editor shows it, without the
-`#`, `*`, `-`, `>` and `1.` characters, with real paragraph spacing and a
-**Page N of M footer** on every page.
-
-**v2.2.1 — editor crash fix** *(tagged)*
-Pressing **Enter inside a numbered list** could close the note editor with a
-`Range [x, y) out of bounds` error, which then had to be reopened. The editor
-walked back to the previous numbered line with an off-by-one index; it now
-reads that line correctly, so `1. 2. 3. …` keeps counting as you type.
-
-**v3.0.0 — accounts** *(planned)*
-User accounts with cloud sync for notes, settings and reading progress — so
-your library follows you across devices.
-
-## ⌨️ Keyboard shortcuts
-
-| Shortcut | Action | Shortcut | Action |
-|----------|--------|----------|--------|
-| `Ctrl+F` | Find — Bible search / in-note find | `Ctrl+Shift+F` | Global notes search |
-| `Ctrl+H` | Find & replace | `Ctrl+G` | Jump to verse |
-| `Ctrl+K` | Insert Bible reference | `Ctrl+Shift+K` | Insert book reference |
-| `Ctrl+S` | Save note | `Ctrl+P` | Export note to PDF |
-| `Ctrl+Z` / `Ctrl+Y` | Undo / redo | `Ctrl+A` | Select all |
-| `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Bold / italic / underline | `Ctrl+←` / `Ctrl+→` | Jump word (add `Shift` to select) |
-| `Ctrl+W` | Back / close | `Esc` | Close search / find bar |
-
-## 🚀 Build & Run
-
-Requires **Java 17+** (JDK).
+Create a keystore and build a signed APK locally:
 
 ```bash
-git clone https://github.com/BacroXP/JasonBible.git
-cd JasonBible
+keytool -genkeypair -v -keystore mobile/release.keystore -alias jasonbible \
+  -keyalg RSA -keysize 2048 -validity 10000
 
-./gradlew run            # run from source
-./gradlew desktopTest    # run the unit tests
-./gradlew packageDeb     # build the Linux .deb (packageDmg / packageMsi on macOS / Windows)
+cat > mobile/keystore.properties <<'EOF'
+storeFile=release.keystore
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=jasonbible
+keyPassword=YOUR_KEY_PASSWORD
+EOF
+
+cd mobile && ./gradlew assembleRelease
 ```
 
-Output lands in `build/compose/binaries/main/`. Shipping a new version?
-Follow **[RELEASING.md](RELEASING.md)** — commit, tag `vX.Y.Z`, and CI builds &
-attaches all three installers to a new release automatically.
+Without a keystore, `assembleRelease` still builds — signed with the Android
+debug key — so a plain local build never breaks. CI prints a warning in that
+case.
 
-## 📸 Screenshots
+### 🤖 CI
 
-*On the way 🚧* — drop real screenshots into `docs/screenshots/` and reference
-them here, e.g.:
+`.github/workflows/release.yml` has a **build-android** job:
 
-<img src="docs/screenshots/home.png" alt="Home" width="70%">
-<img src="docs/screenshots/split-screen.png" alt="Word study" width="70%">
+- every push to any branch builds the **debug APK** and uploads it as the
+  `android-apk` artifact (so the mobile project can't rot);
+- every `v*` tag builds the **release-signed APK** (`JasonBible-phone.apk`),
+  verifies the signing certificate with `apksigner` and **fails the job if it
+  is debug-signed**; the existing `release` job verifies the APK's SHA-256
+  and attaches the APK plus its `.sha256` (and a `SHA256SUMS.txt` covering
+  every release asset) to the GitHub Release next to the desktop installers.
+
+To sign releases in CI, add these repository secrets (Settings → Secrets and
+variables → Actions):
+
+```
+ANDROID_KEYSTORE_BASE64     base64 -w0 of the .keystore file
+ANDROID_KEYSTORE_PASSWORD   keystore password
+ANDROID_KEY_ALIAS           key alias
+ANDROID_KEY_PASSWORD        key password
+```
+
+Tag builds **require** all four secrets; without them `build-android` fails
+with a clear `::error::` rather than publishing a debug-signed APK. Branch
+pushes never need secrets — they build the debug APK artifact.
+
+Download the APK from the release and check it:
+
+```bash
+sha256sum -c JasonBible-phone.apk.sha256      # or: grep JasonBible-phone.apk SHA256SUMS.txt
+```
+
+### Run the desktop phone layout
+
+Requires **Java 17+**:
+
+```bash
+./gradlew run
+```
+
+The window opens phone-sized with the editor | Bible swipe layout.
+
+## ✨ What's in the phone app
+
+| Included | |
+|---|---|
+| 📖 Offline Bible | KJV and Luther 1912 bundled in the APK, book/chapter/verse navigation, translation switch |
+| 📝 Notes | File list, create/delete, plain-text editor, auto-save into app-private storage |
+| 📱 Phone layout | Files ← Editor → Bible swipe pager, status-bar-safe top bar, dark/light theme |
+
+| Not yet ported from the desktop app | |
+|---|---|
+| Strong's word study, interlinear view, full-text search | |
+| Rich editor ribbon (headings, colours, lists, media chips) | |
+| Reading plan, statistics, collections, PDF export | |
+| In-app media player (YouTube / Spotify / local files) | |
+
+The desktop app in `src/desktopMain` is unchanged and still builds/tests
+with `./gradlew desktopTest`.
 
 ## 🗂 Where things live
 
 | What | Where |
 |------|-------|
-| Settings | `~/.bibleapp/private.json` |
-| Notes | `~/.bibleapp/notes/*.note` |
-| Translations | `src/desktopMain/resources/bible/` (auto-detected on startup) |
-
-## What is coming?
-
-| What           | Progress
-|-----           |---------
-| Editor Update  | SHIPPED IN v2.2.0
+| Phone app sources | `mobile/app/src/main/java/com/jasonbible/phone/` |
+| Phone APK | `dist/JasonBible-phone.apk` |
+| Phone notes | app-private `filesDir/notes/*.note` |
+| Desktop phone shell | `src/desktopMain/kotlin/navigation/PhoneShell.kt` |
+| Bundled translations | `mobile/app/src/main/assets/bible/` |
 
 ## 🔗 Links
 
-- **⬇️ Releases & installers** — https://github.com/BacroXP/JasonBible/releases
+- **⬇️ Releases** — https://github.com/BacroXP/JasonBible/releases
 - **🛠 CI pipeline** — https://github.com/BacroXP/JasonBible/actions
-- **📦 Release guide** — [RELEASING.md](RELEASING.md)
-- **🧱 Tech stack** — [Kotlin](https://kotlinlang.org) 2.2 · [Compose Multiplatform](https://www.jetbrains.com/lp/compose-multiplatform/) 1.9 (Material 3) · kotlinx-serialization · Apache PDFBox
+- **🧱 Tech stack** — Kotlin 2.2 · Jetpack Compose (Material 3) · kotlinx-serialization

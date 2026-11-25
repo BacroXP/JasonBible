@@ -32,6 +32,8 @@ import ui.*
 
 enum class Screen {
     HOME,
+    /** The phone-first shell: editor on the left, Bible on the right. */
+    PHONE,
     BIBLE,
     NOTES,
     SPLIT,
@@ -55,9 +57,15 @@ fun Navigation(
      */
     registerWindowKeyHandler: ((KeyEvent) -> Boolean) -> Unit = {}
 ) {
+    // The phone branch opens straight into the phone shell (editor page);
+    // the Home screen is one ☰ tap away.
     var screen by remember {
-        mutableStateOf(Screen.HOME)
+        mutableStateOf(Screen.PHONE)
     }
+    // Phone shell: which page is showing (0 = editor, 1 = bible) and
+    // whether the notes file drawer is open over the editor.
+    var phonePage by remember { mutableStateOf(0) }
+    var phoneFilesOpen by remember { mutableStateOf(false) }
     var selectedBibleReference by remember {
         mutableStateOf<BibleReferenceSelection?>(null)
     }
@@ -153,11 +161,11 @@ fun Navigation(
      */
     fun openBible(reference: BibleReferenceSelection) {
         selectedBibleReference = reference
-        screen = if (screen == Screen.NOTES || screen == Screen.SPLIT) {
-            Screen.SPLIT
-        } else {
-            Screen.BIBLE
-        }
+        // Phone layout: slide to the Bible page (the editor stays open on
+        // the page to its left).
+        phoneFilesOpen = false
+        phonePage = 1
+        screen = Screen.PHONE
     }
 
     /**
@@ -179,15 +187,16 @@ fun Navigation(
             pendingNoteScrollTarget = reference
         }
         pendingScrollLine = scrollLine
-        screen = if (screen == Screen.BIBLE || screen == Screen.SPLIT || reference != null) {
-            Screen.SPLIT
-        } else {
-            Screen.NOTES
-        }
+        // Phone layout: slide to the editor page (the Bible stays open on
+        // the page to its right).
+        phoneFilesOpen = false
+        phonePage = 0
+        screen = Screen.PHONE
     }
 
     fun goHome() {
         screen = Screen.HOME
+        phoneFilesOpen = false
         selectedNoteFileName = null
         selectedBibleReference = null
         pendingNoteScrollTarget = null
@@ -213,10 +222,16 @@ fun Navigation(
                         // from a previous visit (BIBLE's back button doesn't
                         // clear it) so it can't redirect the pane.
                         selectedBibleReference = null
-                        screen = Screen.BIBLE
+                        phoneFilesOpen = false
+                        phonePage = 1
+                        screen = Screen.PHONE
                     },
                     openNotes = {
-                        screen = Screen.NOTES
+                        // Notes opens on the file list, so a note is one tap
+                        // away; the editor is the page to the right of it.
+                        phonePage = 0
+                        phoneFilesOpen = true
+                        screen = Screen.PHONE
                     },
                     openStatistics = {
                         screen = Screen.STATISTICS
@@ -243,6 +258,57 @@ fun Navigation(
                 )
     
     
+            Screen.PHONE ->
+                PhoneShell(
+                    page = phonePage,
+                    onPageChange = { phonePage = it },
+                    onHome = { goHome() },
+                    filesOpen = phoneFilesOpen,
+                    onFilesOpenChange = { phoneFilesOpen = it },
+                    notes = {
+                        NotesScreen(
+                            back = { goHome() },
+                            selectedFileName = selectedNoteFileName,
+                            showBackButton = false,
+                            compact = false,
+                            phoneMode = true,
+                            phoneFilesOpen = phoneFilesOpen,
+                            onPhoneFilesOpenChange = { phoneFilesOpen = it },
+                            pendingScrollReference = pendingNoteScrollTarget,
+                            onScrollReferenceConsumed = { pendingNoteScrollTarget = null },
+                            pendingScrollLine = pendingScrollLine,
+                            onScrollLineConsumed = { pendingScrollLine = null },
+                            onOpenBibleReference = { book, chapter, verse ->
+                                openBible(BibleReferenceSelection(book, chapter, verse))
+                            },
+                            onSelectedNoteChange = { selectedNoteFileName = it },
+                            onOpenGlobalSearch = { appSearch.openSearch() }
+                        )
+                    },
+                    bible = {
+                        BibleScreen(
+                            back = { goHome() },
+                            initialReference = selectedBibleReference,
+                            showBackButton = false,
+                            compact = true,
+                            onOpenNoteTitle = { title, reference ->
+                                openNoteByTitle(title, reference)
+                            },
+                            onOpenGlobalSearch = { appSearch.openSearch() },
+                            onOpenLexicon = { number ->
+                                lexiconInitialNumber = number
+                                screen = Screen.LEXICON
+                            },
+                            onOpenCompare = { bookName, cn, vn ->
+                                compareReference =
+                                    BibleReferenceSelection(bookName, cn, vn)
+                                screen = Screen.COMPARE
+                            }
+                        )
+                    }
+                )
+
+
             Screen.BIBLE ->
                 BibleScreen(
                     back = {

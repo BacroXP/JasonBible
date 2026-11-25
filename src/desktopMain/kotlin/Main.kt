@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.rememberWindowState
@@ -39,7 +40,11 @@ fun main() = application {
         exitApplication()
     }
 
+    // Phone-formatted branch: open in a phone-sized window by default, so
+    // the two-pane swipe layout is what the app actually looks like.
     val windowState = rememberWindowState(
+        width = 430.dp,
+        height = 880.dp,
         placement = if (SettingsManager.fullScreen) {
             // "Standard" fullscreen: a maximized window with the normal
             // OS frame/title bar — not a borderless takeover of the

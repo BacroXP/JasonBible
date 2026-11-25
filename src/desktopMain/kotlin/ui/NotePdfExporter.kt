@@ -2,9 +2,12 @@
 
 package ui
 
+import data.MediaReferenceToken
+import data.MediaService
 import data.findMediaReferenceTokens
 import data.findNoteLinkTokens
 import data.findReferenceTokens
+import data.mediaDisplayLabel
 import model.ParsedNote
 import model.Verse
 import org.apache.pdfbox.pdmodel.PDDocument
@@ -32,9 +35,12 @@ import java.nio.file.Paths
  *     `__underline__` become styled runs, `- ` becomes a `•` bullet,
  *     quoted and coloured lines keep their look, and the editor-only
  *     markers (`#`, `*`, `$`, `>`, alignment control chars) never reach
- *     the page. PDFBox's standard fonts are WinAnsi-encoded, so any
- *     character outside WinAnsi degrades to `?` instead of failing the
- *     export.
+ *     the page. Media references (`@youtube:…`, `@spotify:…`, `@url:…`)
+ *     print as the media's name and author plus a footnote marker, and
+ *     every unique link is listed as `[n] URL` in a Links block at the
+ *     end of the document. PDFBox's standard fonts are WinAnsi-encoded,
+ *     so any character outside WinAnsi degrades to `?` instead of
+ *     failing the export.
  *  3. Word-wrap to page width and auto-paginate when the page fills up.
  *     Paragraphs are separated by a fixed block gap (runs of blank lines
  *     collapse into it) and every page carries a centred `Page N of M`
@@ -115,7 +121,7 @@ object NotePdfExporter {
     }.getOrNull()
 
 
-    private fun writePdf(
+    internal fun writePdf(
         target: Path,
         title: String,
         subtitle: String,
@@ -156,7 +162,8 @@ object NotePdfExporter {
             // runs of them collapse into one fixed gap, and a block that
             // already asks for space above (a heading) never gets it twice.
             var paragraphBreak = false
-            for (block in buildPdfBlocks(bodyWithoutTitle(content))) {
+            val links = PdfLinkIndex()
+            for (block in buildPdfBlocks(bodyWithoutTitle(content), links)) {
                 if (block.blank) {
                     paragraphBreak = true
                     continue
@@ -171,9 +178,50 @@ object NotePdfExporter {
                 flow.gap(block.spaceAfter)
             }
 
+            drawLinkFootnotes(flow, links, margin)
+
             flow.close()
             drawPageNumbers(doc, pageSize)
             doc.save(target.toFile())
+        }
+    }
+
+
+    /**
+     * The footnote apparatus for media / web links: one `[n] URL` line per
+     * unique link, printed after the body (the `[n]` markers in the text
+     * point here). Muted and smaller than body copy so it reads as a
+     * footnote block rather than more prose.
+     */
+    private fun drawLinkFootnotes(
+        flow: PdfPageWriter,
+        links: PdfLinkIndex,
+        margin: Float
+    ) {
+        val entries = links.entries()
+        if (entries.isEmpty()) return
+        flow.gap(PARAGRAPH_GAP + 4f)
+        drawBlock(
+            flow,
+            PdfBlock(
+                runs = listOf(PdfRun("Links", bold = true)),
+                fontSize = 11.5f,
+                lineHeight = 15f,
+                bold = true
+            ),
+            margin
+        )
+        for ((number, url) in entries) {
+            flow.gap(1f)
+            drawBlock(
+                flow,
+                PdfBlock(
+                    runs = listOf(PdfRun("[$number] $url", color = PDF_MUTED)),
+                    fontSize = 9f,
+                    lineHeight = 12f
+                ),
+                margin
+            )
         }
     }
 
@@ -309,6 +357,20 @@ private val PDF_MUTED = PdfColor(0.42f, 0.42f, 0.42f)
 
 private enum class PdfAlign { LEFT, CENTER, RIGHT }
 
+/**
+ * Footnote numbers for the links printed in the body. The first occurrence
+ * of a URL gets its number; repeating the same link reuses it, so the
+ * footnote list stays a de-duplicated link list.
+ */
+private class PdfLinkIndex {
+    private val numbers = LinkedHashMap<String, Int>()
+
+    fun numberFor(url: String): Int = numbers.getOrPut(url) { numbers.size + 1 }
+
+    fun entries(): List<Pair<Int, String>> =
+        numbers.entries.map { it.value to it.key }
+}
+
 private data class PdfColor(val r: Float, val g: Float, val b: Float)
 
 /** One styled span of text: inline emphasis plus an optional colour. */
@@ -370,7 +432,7 @@ private fun bodyWithoutTitle(content: String): String {
  * coloured quotes, plus inline `**bold**`, `*italic*`, `__underline__`
  * and reference / media / note-link chips (rendered as plain text).
  */
-private fun buildPdfBlocks(content: String): List<PdfBlock> {
+private fun buildPdfBlocks(content: String, links: PdfLinkIndex): List<PdfBlock> {
     val blocks = mutableListOf<PdfBlock>()
     var numberedCounter = 0
 
@@ -411,7 +473,7 @@ private fun buildPdfBlocks(content: String): List<PdfBlock> {
                 val trailingStart = colored.groups[3]?.range?.first ?: line.length
                 val hadGap = trailingStart > 0 && line[trailingStart - 1].isWhitespace()
                 if (hadGap) runs.add(PdfRun(" "))
-                runs.addAll(inlineRuns(readableReferences(trailing)))
+                runs.addAll(inlineRuns(readableReferences(trailing, links)))
             }
             blocks.add(
                 PdfBlock(
@@ -444,7 +506,7 @@ private fun buildPdfBlocks(content: String): List<PdfBlock> {
             }
             blocks.add(
                 PdfBlock(
-                    runs = inlineRuns(readableReferences(text), bold = true),
+                    runs = inlineRuns(readableReferences(text, links), bold = true),
                     fontSize = size,
                     lineHeight = size * 1.3f,
                     bold = true,
@@ -496,7 +558,7 @@ private fun buildPdfBlocks(content: String): List<PdfBlock> {
 
         blocks.add(
             PdfBlock(
-                runs = inlineRuns(readableReferences(line.trim()), italic = quoteDepth > 0),
+                runs = inlineRuns(readableReferences(line.trim(), links), italic = quoteDepth > 0),
                 fontSize = BODY_FONT_SIZE,
                 lineHeight = BODY_LINE_HEIGHT,
                 italic = quoteDepth > 0,
@@ -590,25 +652,57 @@ private fun parseInline(text: String, style: PdfRunStyle, out: MutableList<PdfRu
 
 
 /**
- * Replaces the editor's link tokens with the text the editor shows:
- * `$Book&C&V` → "Book C:V", `[[Title]]` → Title, `@service:id` → the
- * chip label. This is what keeps `$`, `&`, `[[`, `]]` and `@` off the
- * printed page.
+ * Replaces the editor's link tokens with printable text: `$Book&C&V` →
+ * "Book C:V", `[[Title]]` → Title, and `@service:id` → the media's name +
+ * author with a footnote marker. This is what keeps `$`, `&`, `[[`, `]]`
+ * and `@` off the printed page.
  */
-private fun readableReferences(text: String): String {
+private fun readableReferences(text: String, links: PdfLinkIndex): String {
     if (text.isEmpty()) return text
-    var result = text
+    val replacements = mutableListOf<Pair<IntRange, String>>()
 
-    findNoteLinkTokens(result).asReversed().forEach { token ->
-        result = result.replaceRange(token.sourceStart, token.sourceEnd, token.title)
+    findNoteLinkTokens(text).forEach { token ->
+        replacements.add(
+            (token.sourceStart until token.sourceEnd) to token.title
+        )
     }
-    findMediaReferenceTokens(result).asReversed().forEach { token ->
-        result = result.replaceRange(token.sourceStart, token.sourceEnd, token.chipText())
+    findMediaReferenceTokens(text).forEach { token ->
+        replacements.add(
+            (token.sourceStart until token.sourceEnd) to mediaReferenceText(token, links)
+        )
     }
-    findReferenceTokens(result).asReversed().forEach { token ->
-        result = result.replaceRange(token.sourceStart, token.sourceEnd, token.pdfText())
+    findReferenceTokens(text).forEach { token ->
+        replacements.add(
+            (token.sourceStart until token.sourceEnd) to token.pdfText()
+        )
+    }
+
+    // Apply back-to-front so every remaining offset stays valid, and the
+    // footnote numbers are still handed out in reading order (the token
+    // list above is walked front to back).
+    var result = text
+    for ((range, replacement) in replacements.sortedByDescending { it.first.first }) {
+        result = result.replaceRange(range.first, range.last + 1, replacement)
     }
     return result
+}
+
+
+/**
+ * Printed text for a media token: the media's name and author when known
+ * ("Never Gonna Give You Up — Rick Astley") followed by its footnote
+ * number, so the URL itself only appears in the Links block. Local files
+ * have no link and keep the chip text.
+ */
+private fun mediaReferenceText(
+    token: MediaReferenceToken,
+    links: PdfLinkIndex
+): String {
+    if (token.service == MediaService.FILE) return token.chipText()
+    val url = token.resolveUrl() ?: return token.chipText()
+    val label = mediaDisplayLabel(token) ?: token.chipText()
+    val number = links.numberFor(url)
+    return if (label.isEmpty()) "[$number]" else "$label [$number]"
 }
 
 /** `Book C:V` (plus a resolved `-E` / `-C2:E` range) without markers. */

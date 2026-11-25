@@ -85,16 +85,20 @@ import androidx.compose.ui.window.PopupProperties
 import data.BibleCatalog
 import data.BibleRepository
 import data.MediaFileKind
+import data.MediaPreviewFetcher
+import data.MediaPreviewInfoCache
 import data.MediaReferenceToken
 import data.MediaSearchKind
 import data.MediaSearchResult
 import data.MediaService
 import data.MediaTitleCache
 import data.NotesRepository
+import data.ProfileInfoCache
 import data.SettingsManager
 import data.SoundEvent
 import data.SoundManager
 import data.fetchMediaTitle
+import data.fetchProfileInfo
 import data.findMediaReferenceTokens
 import data.isPlayable
 import data.isProfile
@@ -199,6 +203,16 @@ fun NotesScreen(
     selectedFileName: String? = null,
     showBackButton: Boolean = true,
     compact: Boolean = false,
+    /**
+     * Phone layout: the notes file list becomes a drawer over the editor
+     * that is opened by [phoneFilesOpen] instead of by hovering the left
+     * edge (a phone has no hover). The phone shell swipes the drawer open
+     * when the user swipes right on the editor.
+     */
+    phoneMode: Boolean = false,
+    /** Whether the phone layout's notes drawer is open. */
+    phoneFilesOpen: Boolean = false,
+    onPhoneFilesOpenChange: (Boolean) -> Unit = {},
     /**
      * Optional cross-screen "land me on this verse" target. When non-null
      * and the editor text + layout result are both ready, the editor's
@@ -470,6 +484,9 @@ fun NotesScreen(
     // Clipboard writes are async (suspend) in the new Compose API; all
     // copy/paste actions launch on this scope.
     val clipboardScope = rememberCoroutineScope()
+    // PDF export runs on this scope: it pre-fetches the media previews
+    // (title + author) the exported document prints before writing it.
+    val exportScope = rememberCoroutineScope()
 
     // Word-style font-size zoom (A− / A+). A pure VIEW setting: it scales
     // the editor's rendered text but never touches the saved .note content.
@@ -695,8 +712,15 @@ fun NotesScreen(
     fun doExport() {
         SoundManager.play(SoundEvent.Click)
         val note = selectedNote ?: return
-        val path = NotePdfExporter.exportAsPdf(note, editorValue.text)
-        if (path != null) saveBanner = "PDF saved to $path"
+        val content = editorValue.text
+        // The PDF prints each media's name + author, so warm the preview
+        // caches first (usually instant — the editor already fetched the
+        // chips' titles). Then open the save dialog and write the file.
+        exportScope.launch {
+            prefetchPdfMediaInfo(content)
+            val path = NotePdfExporter.exportAsPdf(note, content)
+            if (path != null) saveBanner = "PDF saved to $path"
+        }
     }
 
     /**
@@ -1198,7 +1222,14 @@ fun NotesScreen(
     // the bible pane and the editor — forcing the sidebar open would feel
     // like the editor is fighting the cursor. Pin the sidebar to visible
     // there and disable the hover trigger altogether.
-    val showNotesList = compact || isNotesHovered
+    // In phone mode the drawer has no hover trigger at all: the shell opens
+    // it (swipe right on the editor / the Files tab), so its state is the
+    // single source of truth.
+    val showNotesList = when {
+        phoneMode -> phoneFilesOpen
+        compact -> true
+        else -> isNotesHovered
+    }
 
     // Outer-window sizing mirrors BibleScreen so the editor and bible
     // widgets feel like siblings at the edge of the window. Standalone
@@ -1242,8 +1273,15 @@ fun NotesScreen(
                 if (!compact) {
                     Box(
                         modifier = Modifier.fillMaxHeight()
-                            .hoverable(notesHoverSource)
-                            .soundHoverOn(notesHoverSource)
+                            .then(
+                                if (phoneMode) {
+                                    Modifier
+                                } else {
+                                    Modifier
+                                        .hoverable(notesHoverSource)
+                                        .soundHoverOn(notesHoverSource)
+                                }
+                            )
                     ) {
                         Row(modifier = Modifier.fillMaxHeight()) {
                             Box(
@@ -1281,7 +1319,9 @@ fun NotesScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxHeight()
-                                        .width(240.dp),
+                                        // Narrower on a phone so the editor is
+                                        // still readable beside the drawer.
+                                        .width(if (phoneMode) 200.dp else 240.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Row(
@@ -1334,6 +1374,20 @@ fun NotesScreen(
                                                     }
                                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                                             )
+                                            // Phone drawer: close without picking.
+                                            if (phoneMode) {
+                                                Text(
+                                                    text = "\u2715",
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier
+                                                        .clickable {
+                                                            SoundManager.play(SoundEvent.Click)
+                                                            onPhoneFilesOpenChange(false)
+                                                        }
+                                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                )
+                                            }
                                         }
                                     }
 
@@ -1350,6 +1404,8 @@ fun NotesScreen(
                                                         if (selectedFileNameState != note.fileName) {
                                                             selectedFileNameState = note.fileName
                                                         }
+                                                        // Picking a note closes the drawer.
+                                                        if (phoneMode) onPhoneFilesOpenChange(false)
                                                     },
                                                     onDelete = { deleteCandidate = note },
                                                     onRename = { renameCandidate = note },
@@ -2916,6 +2972,30 @@ private fun referenceLabel(selection: BibleReferenceSelection): String = buildSt
     selection.verse?.let { verse ->
         append(':')
         append(verse)
+    }
+}
+
+
+/**
+ * Warm the session caches with the title / author of every media link in
+ * [content] before a PDF export, so the exporter can resolve a printable
+ * name without blocking on the network itself. Already-cached URLs (and
+ * the failure nulls) are skipped, so notes with previously fetched media
+ * export immediately; local files and bare links need no fetch.
+ */
+private suspend fun prefetchPdfMediaInfo(content: String) {
+    for (token in findMediaReferenceTokens(content)) {
+        val url = token.resolveUrl() ?: continue
+        when {
+            token.service == MediaService.FILE || token.service == MediaService.LINK ->
+                continue
+
+            token.isProfile ->
+                if (!ProfileInfoCache.isCached(url)) fetchProfileInfo(token)
+
+            else ->
+                if (!MediaPreviewInfoCache.isCached(url)) MediaPreviewFetcher.fetch(token)
+        }
     }
 }
 

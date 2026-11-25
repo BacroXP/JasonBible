@@ -11,8 +11,8 @@ is fully automated:
 
 | Event | What runs |
 |---|---|
-| Any push to **any branch** | `test` job (desktop unit tests) |
-| Push of a tag `v*` (e.g. `v1.0.0`) | `test` → `build-deb` (Ubuntu) + `build-msi` (Windows) + `build-dmg` (macOS) in parallel → `release` job attaches everything (installers + apt index) to the GitHub Release |
+| Any push to **any branch** | `test` job (desktop unit tests) + `build-android` (debug APK artifact) |
+| Push of a tag `v*` (e.g. `v1.0.0`) | `test` → `build-deb` (Ubuntu) + `build-msi` (Windows) + `build-dmg` (macOS) + `build-android` (release APK) in parallel → `release` job attaches everything (installers + apt index + APK) to the GitHub Release |
 
 The three installers are built on their **native OS** (the Compose plugin
 cannot cross-compile MSI/DMG), then one final job uploads them all to the
@@ -36,6 +36,29 @@ anywhere. No GitHub Pages setup required.
 > release assets (and as local build output under `build/`). The README's
 > download links point at the Releases page, not at the repo.
 
+### 📱 Android APK
+
+The `build-android` job builds `mobile/` with the Android SDK and uploads
+`app-debug.apk` on branch pushes (`android-apk` artifact) or a signed
+`app-release.apk` on tags. The tag build needs these repository secrets:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 release.keystore` |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_ALIAS` | key alias |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+Tag builds **require** all four secrets: missing signing material fails the
+`build-android` job before anything is published. Branch pushes build the
+debug APK artifact without secrets. Locally `mobile/keystore.properties`
+does the same job for `./gradlew assembleRelease`.
+
+The APK is published as `JasonBible-phone.apk`, next to
+`JasonBible-phone.apk.sha256` and a `SHA256SUMS.txt` covering every release
+asset. The `release` job verifies the APK against its checksum before
+uploading; users can re-check with `sha256sum -c JasonBible-phone.apk.sha256`.
+
 ---
 
 ## Step 0 — Pre-flight checks (recommended)
@@ -49,7 +72,10 @@ Run these locally before tagging anything:
 # 2. The Linux package builds
 ./gradlew packageDeb
 
-# 3. Optional smoke test of the freshly built package
+# 3. The Android APK builds (needs JDK 21 + Android SDK 35 in mobile/local.properties)
+(cd mobile && ./gradlew assembleDebug)
+
+# 4. Optional smoke test of the freshly built package
 sudo apt install ./build/compose/binaries/main/deb/bibleapp_2.2.1_amd64.deb
 ```
 
@@ -107,7 +133,8 @@ a failing test blocks the installer builds by design.
      tidy it into user-facing bullets if you like (see below for a
      template).
    - Tick **Set as the latest release**.
-3. Confirm the three assets are listed: `*.deb`, `*.msi`, `*.dmg`.
+3. Confirm the assets are listed: `*.deb`, `*.msi`, `*.dmg`,
+   `JasonBible-phone.apk`, `JasonBible-phone.apk.sha256`, `SHA256SUMS.txt`.
 4. Click **Publish release**.
 
 ### Release-notes template
@@ -144,4 +171,8 @@ a failing test blocks the installer builds by design.
 | `release` job failed with `Unexpected error fetching GitHub release for tag refs/tags/…: HttpError` | This was `softprops/action-gh-release` re-sending an existing release's `target_commitish` on re-runs, which GitHub refuses for `GITHUB_TOKEN`. The job now uploads assets with `gh release upload --clobber`, so simply re-running the failed job is enough. |
 | MSI/DMG missing | They can only be built on Windows/macOS runners — check the respective job logs for toolchain issues (WiX download, `hdiutil`). |
 | `test` job failed | A unit test is broken — fix and push again before tagging. |
+| Android job failed with `SDK location not found` | `mobile/local.properties` (or `ANDROID_HOME`) is missing; CI installs SDK 35 via `setup-android`. |
+| `build-android` failed at "Write release signing config" | A signing secret is missing; add all four, then re-run the tag build. |
+| Release APK says `CN=Android Debug` / "Assert release APK is not debug-signed" failed | The signing secrets were not used — check them; a debug-signed APK is never published. |
+| `sha256sum -c` fails on a downloaded APK | The download is truncated/corrupted or the asset was overwritten; re-download, and compare against `SHA256SUMS.txt`. |
 | `check-file-sizes` job failed | A tracked file exceeds GitHub's 100 MB per-file limit (files over 50 MB only warn). Move the file out of the repo — e.g. attach it to the release as an asset instead — then push again. |

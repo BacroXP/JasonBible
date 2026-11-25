@@ -150,8 +150,118 @@ jobs:
           name: installers-macos
           path: build/compose/binaries/main/dmg/*.dmg
 
+  # Phone app (Android): builds a debug APK on EVERY branch push so the
+  # mobile project can't rot, and a RELEASE build on version tags. Release
+  # builds are signed when the Android signing secrets are present; without
+  # them the job still succeeds, signed with the debug key, and prints a
+  # warning. The APK is uploaded as an artifact and attached to the GitHub
+  # Release by the `release` job below.
+  build-android:
+    needs: [test, check-file-sizes]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: yes | sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+
+      # Write mobile/keystore.properties from repository secrets. Only on
+      # tags: a release keystore is never needed for a branch build.
+      - name: Write release signing config
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: mobile
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # A published APK must never be debug-signed: fail the tag build
+          # loudly instead of quietly attaching a debug-key APK.
+          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${STORE_PASSWORD:-}" ] \
+             || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::error::Signed release APK needs ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD secrets."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > release.keystore
+          {
+            echo "storeFile=release.keystore"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+
+      - name: Build release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: mobile
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Build debug APK
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        working-directory: mobile
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Verify APK signing certificate
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk -name '*.apk' | head -1)
+          echo "Built $APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" | tee /tmp/apk-certs.txt
+
+      # Publishing safety net: the tag build fails if the certificate is the
+      # shared Android debug key rather than the release key.
+      - name: Assert release APK is not debug-signed
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          if grep -q "CN=Android Debug" /tmp/apk-certs.txt; then
+            echo "::error::The release APK is debug-signed. Add the Android signing secrets and re-run."
+            exit 1
+          fi
+          grep -m1 "certificate DN" /tmp/apk-certs.txt
+
+      # Flatten the APK into its own directory so the artifact lands at the
+      # root when the release job merges it with the desktop installers
+      # (gh release upload installers/* only globs files), give it a
+      # user-facing asset name, and write its SHA-256 checksum next to it.
+      - name: Collect APK + checksum
+        working-directory: mobile
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/apk-out
+          if [ "$REF_TYPE" = "tag" ]; then
+            APK_NAME=JasonBible-phone.apk
+            SRC=app/build/outputs/apk/release/app-release.apk
+          else
+            APK_NAME=JasonBible-phone-debug.apk
+            SRC=app/build/outputs/apk/debug/app-debug.apk
+          fi
+          cp "$SRC" "build/apk-out/$APK_NAME"
+          ( cd build/apk-out && sha256sum "$APK_NAME" > "$APK_NAME.sha256" )
+          cat "build/apk-out/$APK_NAME.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: |
+            mobile/build/apk-out/*.apk
+            mobile/build/apk-out/*.sha256
+          if-no-files-found: error
+
   release:
-    needs: [build-deb, build-msi, build-dmg]
+    needs: [build-deb, build-msi, build-dmg, build-android]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -161,6 +271,25 @@ jobs:
         with:
           path: installers
           merge-multiple: true
+
+      # The checksum file was written by the Android job; verify the APK
+      # against it before it is published.
+      - name: Verify APK checksum
+        run: |
+          set -euo pipefail
+          cd installers
+          sha256sum -c JasonBible-phone.apk.sha256
+
+      # One checksum file covering every release asset (APK + desktop
+      # installers), attached alongside them.
+      - name: Generate SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          cd installers
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' \
+            -exec sha256sum {} + \
+            | sed 's|  \./|  |' | sort -k2 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       # Upload with the `gh` CLI rather than softprops/action-gh-release.
       # When the release for the tag already exists (a re-run, or a release

@@ -759,6 +759,67 @@ class MediaReferencesTest {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Printable media labels — PDF shows name + author, URL in a footnote
+    // ------------------------------------------------------------------
+
+    @Test
+    fun mediaDisplayLabelCombinesTitleAndAuthor() {
+        MediaPreviewInfoCache.clearForTests()
+        MediaTitleCache.clearForTests()
+        try {
+            val token = findMediaReferenceTokens("@youtube:dQw4w9WgXcQ").single()
+            MediaPreviewInfoCache.put(
+                token.resolveUrl()!!,
+                MediaPreviewInfo(
+                    title = "Never Gonna Give You Up",
+                    author = "Rick Astley"
+                )
+            )
+            assertEquals(
+                "Never Gonna Give You Up — Rick Astley",
+                mediaDisplayLabel(token)
+            )
+        } finally {
+            MediaPreviewInfoCache.clearForTests()
+            MediaTitleCache.clearForTests()
+        }
+    }
+
+    @Test
+    fun mediaDisplayLabelFallsBackToTitleThenLinkDomain() {
+        MediaPreviewInfoCache.clearForTests()
+        MediaTitleCache.clearForTests()
+        try {
+            // No cached preview: the chip title cache still names the media.
+            val video = findMediaReferenceTokens("@youtube:dQw4w9WgXcQ").single()
+            MediaTitleCache.put(video.resolveUrl()!!, "Never Gonna Give You Up")
+            assertEquals("Never Gonna Give You Up", mediaDisplayLabel(video))
+
+            // A bare link has no title — its domain is the printable name.
+            val link = findMediaReferenceTokens("@url:https://example.com/post/123").single()
+            assertEquals("example.com", mediaDisplayLabel(link))
+        } finally {
+            MediaPreviewInfoCache.clearForTests()
+            MediaTitleCache.clearForTests()
+        }
+    }
+
+    @Test
+    fun mediaDisplayLabelUsesProfileName() {
+        ProfileInfoCache.clearForTests()
+        try {
+            val profile = findMediaReferenceTokens("@youtube:@TestHandle").single()
+            ProfileInfoCache.put(
+                profile.resolveUrl()!!,
+                MediaProfileInfo(name = "Test Channel")
+            )
+            assertEquals("Test Channel", mediaDisplayLabel(profile))
+        } finally {
+            ProfileInfoCache.clearForTests()
+        }
+    }
+
     @Test
     fun parseProfileMetaExtractsFollowerCountFromDescription() {
         // Spotify artists advertise their listeners in the description
