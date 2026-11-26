@@ -229,6 +229,14 @@ fun HomeScreen(
             )
             Spacer(Modifier.height(6.dp))
         }
+
+        Text(
+            text = "v2.2.1",
+            color = MenuMuted.copy(alpha = 0.55f),
+            fontSize = 10.sp,
+            letterSpacing = 1.sp,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp)
+        )
     }
 }
 
