@@ -1,0 +1,33 @@
+name: Block phone into main
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  block-phone:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'phone'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR" --body "The \`phone\` branch is a standalone Android edition and cannot be merged into \`main\`. Keep phone changes on \`phone\`; make desktop changes directly on \`main\`."
+          gh pr close "$PR"
+          echo "::error::The phone branch cannot be merged into main."
+          exit 1
