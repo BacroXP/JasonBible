@@ -19,10 +19,9 @@
 
 <div class="hero" align="center">
   <p class="hero-icon"><img src="icon.png" width="168" height="168" alt="JasonBible icon"></p>
-  <p class="eyebrow">Offline scripture study · Linux · Windows · macOS</p>
+  <p class="eyebrow">Offline scripture study</p>
   <h1>Jason<em class="accent">Bible</em></h1>
-  <p class="tagline"><strong>A fast, fully offline Bible reader &amp; note-taking app for Linux, Windows &amp; macOS.</strong></p>
-  <p class="sub">90+ translations · 52 languages · word study with Strong's numbers · rich notes editor</p>
+  <p class="tagline"><strong>Linux · Windows · macOS</strong></p>
   <p class="badges">
     <a href="https://github.com/BacroXP/JasonBible/releases"><img src="https://img.shields.io/github/v/release/BacroXP/JasonBible?label=release&amp;color=informational" alt="Latest release"></a>
     <a href="https://github.com/BacroXP/JasonBible/actions"><img src="https://github.com/BacroXP/JasonBible/actions/workflows/release.yml/badge.svg" alt="CI — Build &amp; Release"></a>
@@ -39,7 +38,6 @@
     <a href="#screenshots">Screenshots</a>
     <a href="#links">Links</a>
   </p>
-  <p class="site-link"><a href="https://bacroxp.github.io/JasonBible/">Live site · bacroxp.github.io/JasonBible</a></p>
 </div>
 
 <hr>
@@ -180,7 +178,8 @@ sudo apt install bibleapp</code></pre>
     <tr><td><strong>v2.0.0</strong></td><td>Media — in-app playback &amp; rich media cards</td><td>✅ Released</td></tr>
     <tr><td><strong>v2.1.0</strong></td><td>Quality of life — rename, hover previews, word-study hover, lean stats, auto-save</td><td>✅ Released</td></tr>
     <tr><td><strong>v2.2.0</strong></td><td>Editor &amp; PDF — all heading levels, marker-free editor, clean PDF export</td><td>✅ Released</td></tr>
-    <tr><td><strong>v2.2.1</strong></td><td>Fix — Enter in a numbered list no longer crashes the editor</td><td>🚧 Tagged</td></tr>
+    <tr><td><strong>v2.2.1</strong></td><td>Fix — Enter in a numbered list no longer crashes the editor</td><td>✅ Released</td></tr>
+    <tr><td><strong>v2.3.0</strong></td><td>Reading &amp; print — verse colors, verse cards, richer PDF, in-app updates</td><td>🚧 Tagged</td></tr>
     <tr><td><strong>v3.0.0</strong></td><td>Accounts — sync &amp; cloud</td><td>🗓 Planned</td></tr>
   </tbody>
 </table>
@@ -224,6 +223,19 @@ Pressing <strong>Enter inside a numbered list</strong> could close the note edit
 <code>Range [x, y) out of bounds</code> error, which then had to be reopened. The editor
 walked back to the previous numbered line with an off-by-one index; it now
 reads that line correctly, so <code>1. 2. 3. …</code> keeps counting as you type.</p>
+
+<p class="release"><strong>v2.3.0 — verse colors, cards &amp; print</strong> <em>tagged</em><br>
+Verses can be <strong>marked in any color</strong> from the verse detail panel, and the
+reading view tints marked verses with it. Verse ranges such as
+<code>$John$3$16-21</code> now highlight and open as one block, and any verse or
+range can be exported as a <strong>postcard</strong> (one or two verses) or a
+<strong>PowerPoint slide</strong> from the verse right-click menu and the editor's
+reference menu. <strong>PDF export</strong> prints the same colors as the editor,
+keeps <strong>Spotify / YouTube links</strong> as their real URLs and leaves a blank
+line between quoted scripture and your own words. The in-app player now uses
+one card style for video, audio and Spotify, the reader no longer shows the
+<code>¶</code> paragraph marks, and the app <strong>checks GitHub for a new release</strong>
+and can install it for you.</p>
 
 <p class="release"><strong>v3.0.0 — accounts</strong> <em>planned</em><br>
 User accounts with cloud sync for notes, settings and reading progress — so
@@ -298,6 +310,7 @@ drop them into <code>docs/screenshots/</code> and reference them from this page.
 <h2 id="links">Links</h2>
 
 <ul class="links">
+  <li id="live-site"><strong>Live site</strong> — <a href="https://bacroxp.github.io/JasonBible/">bacroxp.github.io/JasonBible</a></li>
   <li><strong>Releases &amp; installers</strong> — <a href="https://github.com/BacroXP/JasonBible/releases">github.com/BacroXP/JasonBible/releases</a></li>
   <li><strong>CI pipeline</strong> — <a href="https://github.com/BacroXP/JasonBible/actions">github.com/BacroXP/JasonBible/actions</a></li>
   <li><strong>Release guide</strong> — <a href="https://github.com/BacroXP/JasonBible/blob/main/RELEASING.md">RELEASING.md</a></li>
