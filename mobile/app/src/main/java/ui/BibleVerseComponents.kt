@@ -168,7 +168,10 @@ internal fun ChapterJumpStrip(
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onScrub: (Int) -> Unit,
-    onScrollToTop: () -> Unit
+    onScrollToTop: () -> Unit,
+    // Phones have no room for a chapter slider next to Prev / Next — the
+    // thumb ends up sitting on top of the neighbouring labels.
+    showSlider: Boolean = true
 ) {
     val totalChapters = book.chapters.size
     val hasNext = chapterNumber < totalChapters
@@ -210,6 +213,7 @@ internal fun ChapterJumpStrip(
                 .clickable { onScrollToTop() }
         )
 
+        if (showSlider) {
         Slider(
             value = chapterNumber.toFloat(),
             onValueChange = { v ->
@@ -220,6 +224,7 @@ internal fun ChapterJumpStrip(
             enabled = totalChapters > 1,
             modifier = Modifier.weight(1f)
         )
+        }
 
         Box(
             modifier = Modifier

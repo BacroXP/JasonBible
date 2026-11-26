@@ -12,6 +12,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -56,10 +58,14 @@ fun MaxWidthScaffold(
     maxWidth: Dp = 980.dp,
     content: @Composable () -> Unit
 ) {
+    // Phones need every dp: the standalone 24.dp window margin plus the
+    // screen's own padding leaves too little room for the verse column.
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val narrow = screenWidth < 520.dp
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(if (compact) 16.dp else 24.dp)
+            .padding(if (narrow) 12.dp else if (compact) 16.dp else 24.dp)
             .then(modifier),
         contentAlignment = if (compact) Alignment.TopStart else Alignment.Center
     ) {

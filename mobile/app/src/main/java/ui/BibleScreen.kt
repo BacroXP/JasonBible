@@ -50,6 +50,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
@@ -650,6 +652,9 @@ fun BibleScreen(
         }
     }
 
+    // Same phone breakpoint as the scaffold: drop the desktop's generous
+    // inner margins so the verses use the full width of a phone screen.
+    val narrowScreen = LocalConfiguration.current.screenWidthDp.dp < 520.dp
     MaxWidthScaffold(
         compact = compact,
         modifier = Modifier.onPreviewKeyEvent(chapterShortcutHandler),
@@ -667,7 +672,7 @@ fun BibleScreen(
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier
-                    .padding(if (compact) 12.dp else 24.dp)
+                    .padding(if (compact || narrowScreen) 12.dp else 24.dp)
                     .fillMaxSize()
             ) {
                 // Header: title (standalone) + quick translation switcher.
@@ -1004,7 +1009,8 @@ ChapterJumpStrip(
                                             scope.launch {
                                                 verseScrollState.scrollTo(0)
                                             }
-                                        }
+                                        },
+                                        showSlider = !narrowScreen
                                     )
 
                                     Row(
