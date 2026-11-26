@@ -218,16 +218,6 @@ fun Navigation(
                     openNotes = {
                         screen = Screen.NOTES
                     },
-                    openStatistics = {
-                        screen = Screen.STATISTICS
-                    },
-                    openLexicon = {
-                        lexiconInitialNumber = null
-                        screen = Screen.LEXICON
-                    },
-                    openCollections = {
-                        screen = Screen.COLLECTIONS
-                    },
                     openSettings = {
                         settingsSearchPrefill = null
                         screen = Screen.SETTINGS
