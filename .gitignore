@@ -1,23 +1,63 @@
-# Gradle / build output
+# ---------------------------------------------------------------------------
+# GNU Gradle / Kotlin build output — generated locally and in CI, never commit
+# ---------------------------------------------------------------------------
 .gradle/
+.kotlin/
 build/
 out/
+captures/
+.externalNativeBuild/
+.cxx/
 
-# Android SDK location for the phone app build (machine-specific)
-mobile/local.properties
+# Built app packages and installers
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+dist/
+installers/
 
-# Android release signing material — never commit these
-mobile/keystore.properties
+# ---------------------------------------------------------------------------
+# Local machine configuration (Android SDK path, etc.)
+# ---------------------------------------------------------------------------
+local.properties
+
+# ---------------------------------------------------------------------------
+# Release signing material — keep keys out of the repository
+# ---------------------------------------------------------------------------
+keystore.properties
 *.keystore
 *.jks
+*.p12
 
-# IntelliJ IDEA
+# ---------------------------------------------------------------------------
+# Editor / IDE
+# ---------------------------------------------------------------------------
 .idea/
 *.iml
+*.ipr
+*.iws
+.vscode/
 
+# ---------------------------------------------------------------------------
+# Tooling and scratch output
+# ---------------------------------------------------------------------------
+.freebuff/
+stuff/
+*.tmp
+
+# ---------------------------------------------------------------------------
 # OS files
+# ---------------------------------------------------------------------------
 .DS_Store
+._*
 Thumbs.db
+desktop.ini
 
-# Logs
+# ---------------------------------------------------------------------------
+# Logs and crash dumps
+# ---------------------------------------------------------------------------
 *.log
+hs_err_pid*
+replay_pid*
