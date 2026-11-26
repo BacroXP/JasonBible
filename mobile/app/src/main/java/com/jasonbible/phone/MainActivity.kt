@@ -6,46 +6,43 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowInsetsControllerCompat
+import data.SettingsManager
+import ui.AppColorStyle
+import ui.appColorScheme
+import ui.appTypography
 
-private val Navy = Color(0xFF0B1B3A)
-private val DeepNavy = Color(0xFF071228)
-private val Gold = Color(0xFFF2C14E)
-private val Cream = Color(0xFFF7F1E3)
-private val Muted = Color(0xFFB9C2D8)
 
-private val JasonBibleColors = darkColorScheme(
-    primary = Gold,
-    onPrimary = DeepNavy,
-    primaryContainer = Gold,
-    onPrimaryContainer = DeepNavy,
-    secondary = Gold,
-    onSecondary = DeepNavy,
-    background = Navy,
-    onBackground = Cream,
-    surface = Navy,
-    onSurface = Cream,
-    surfaceVariant = Color(0xFF13294D),
-    onSurfaceVariant = Muted,
-    outline = Color(0xFF2A4270),
-    outlineVariant = Color(0xFF1B3158)
-)
-
+/**
+ * Hosts the app inside the SAME theme the desktop build uses (`ui.AppTheme`):
+ * the Pages palette, the serif typography and the Normal / Saturated /
+ * Gray / Custom color styles all come from SettingsManager, so changing a
+ * colour style in Settings restyles the phone app exactly like the desktop.
+ */
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Navy.toArgb()
-        window.navigationBarColor = Navy.toArgb()
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            isAppearanceLightNavigationBars = false
-        }
         setContent {
-            MaterialTheme(colorScheme = JasonBibleColors) {
+            val dark = SettingsManager.darkMode
+            val style = AppColorStyle.fromKey(SettingsManager.colorStyle)
+            val accent = SettingsManager.customAccentColor
+            val scheme = appColorScheme(dark, style, accent)
+
+            // Match the system bars to the current Pages background.
+            window.statusBarColor = scheme.background.toArgb()
+            window.navigationBarColor = scheme.background.toArgb()
+            WindowInsetsControllerCompat(window, window.decorView).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+
+            MaterialTheme(
+                colorScheme = scheme,
+                typography = appTypography()
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

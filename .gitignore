@@ -61,3 +61,6 @@ desktop.ini
 *.log
 hs_err_pid*
 replay_pid*
+
+# Project-local Android SDK (phone builds)
+mobile/.android-sdk/

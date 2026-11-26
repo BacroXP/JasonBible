@@ -1,0 +1,57 @@
+name: Phone APK release
+
+# Builds the Android app from this branch and replaces the asset on the
+# rolling "phone-latest" release. The landing page links straight to
+#   https://github.com/BacroXP/JasonBible/releases/download/phone-latest/JasonBible-phone.apk
+# because the APK (147 MB) is far past GitHub's 100 MB limit for files in
+# the repository, so it can never live on gh-pages.
+
+on:
+  push:
+    branches: [phone]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/phone-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phone-release
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build release APK
+        working-directory: mobile
+        run: ./gradlew :app:assembleRelease --no-daemon --console=plain
+
+      - name: Stage APK
+        run: cp mobile/app/build/outputs/apk/release/app-release.apk JasonBible-phone.apk
+
+      - name: Publish to the rolling phone release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: phone-latest
+          name: JasonBible Phone (latest build)
+          prerelease: false
+          make_latest: false
+          files: JasonBible-phone.apk
+          body: |
+            Automatic build of the `phone` branch — the Android edition with
+            the full offline library (143 translations), the swipe workspace
+            and the desktop feature set.
+
+            Built from ${{ github.sha }}.

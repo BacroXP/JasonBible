@@ -1,0 +1,380 @@
+@file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+    androidx.compose.ui.ExperimentalComposeUiApi::class
+)
+
+package ui
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import data.SoundEvent
+import data.SoundManager
+import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
+import model.ParsedNote
+import kotlin.math.roundToInt
+
+
+
+@Composable
+internal fun EditorHeader(
+    note: ParsedNote,
+    saving: Boolean,
+    onSave: () -> Unit,
+    onExport: () -> Unit,
+    onNew: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
+    onBack: (() -> Unit)?,
+    /** Renames the note without touching its first line. */
+    onRename: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            BibleEyebrow("NOTE")
+            Text(
+                text = note.title.ifBlank { note.fileName },
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = note.fileName,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // The header keeps icon actions only — the labelled buttons that
+        // used to crowd this row were duplicates of ribbon / shortcut
+        // actions. Tooltips carry the shortcut hints.
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (onRename != null) {
+                ToolbarTip(label = "Rename note (keeps the first line)") {
+                    ChromeIconButton(
+                        icon = RibbonIcons.Edit,
+                        description = "Rename note",
+                        onClick = onRename
+                    )
+                }
+            }
+            if (onBack != null) {
+                ToolbarTip(label = "Back to previous screen", shortcut = "Ctrl+W") {
+                    ChromeIconButton(
+                        icon = RibbonIcons.Back,
+                        description = "Back",
+                        onClick = onBack
+                    )
+                }
+            }
+            ToolbarTip(label = "Export note as PDF", shortcut = "Ctrl+P") {
+                ChromeIconButton(
+                    icon = RibbonIcons.Export,
+                    description = "Export note as PDF",
+                    onClick = onExport
+                )
+            }
+            ToolbarTip(label = "Save note", shortcut = "Ctrl+S") {
+                ChromeIconButton(
+                    icon = RibbonIcons.Save,
+                    description = if (saving) "Saving" else "Save note",
+                    active = saving,
+                    onClick = onSave
+                )
+            }
+            if (onNew != null) {
+                ToolbarTip(label = "Create a new note") {
+                    ChromeIconButton(
+                        icon = RibbonIcons.New,
+                        description = "New note",
+                        onClick = onNew
+                    )
+                }
+            }
+            if (onDelete != null) {
+                ToolbarTip(label = "Delete note") {
+                    ChromeIconButton(
+                        icon = RibbonIcons.Delete,
+                        description = "Delete note",
+                        danger = true,
+                        onClick = onDelete
+                    )
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+internal fun EditorFooter(
+    value: TextFieldValue,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    fontScale: Float,
+    onFontScaleChange: (Float) -> Unit,
+    onFontScaleCommit: () -> Unit,
+    onEditorValueChange: (TextFieldValue) -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit
+) {
+    val onSurface = MaterialTheme.colorScheme.onSurfaceVariant
+    val stats = remember(value.text) { computeTextStats(value.text) }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "${stats.words} ${if (stats.words == 1) "word" else "words"}" +
+                "  \u00B7  ${stats.chars} chars",
+            style = MaterialTheme.typography.bodySmall,
+            color = onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.then(if (canUndo) Modifier.clickable { onUndo() } else Modifier)
+            ) {
+                Icon(
+                    RibbonIcons.Undo,
+                    contentDescription = null,
+                    tint = if (canUndo) MaterialTheme.colorScheme.primary else onSurface.copy(alpha = 0.4f),
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Undo",
+                    color = if (canUndo) MaterialTheme.colorScheme.primary else onSurface.copy(alpha = 0.4f),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.then(if (canRedo) Modifier.clickable { onRedo() } else Modifier)
+            ) {
+                Icon(
+                    RibbonIcons.Redo,
+                    contentDescription = null,
+                    tint = if (canRedo) MaterialTheme.colorScheme.primary else onSurface.copy(alpha = 0.4f),
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Redo",
+                    color = if (canRedo) MaterialTheme.colorScheme.primary else onSurface.copy(alpha = 0.4f),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { onEditorValueChange(TextFieldValue("")) }
+            ) {
+                Icon(
+                    RibbonIcons.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Clear",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+
+            // Word-style status-bar zoom: − slider +, percentage label.
+            // Live-preview on drag, persisted once on release. The cluster
+            // uses tight 4dp spacing and the slider shrinks first (48..90dp)
+            // so the footer never clips the zoom on narrow SPLIT panes.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "\u2212",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.clickable {
+                        onFontScaleChange(fontScale - 0.1f)
+                        onFontScaleCommit()
+                    }
+                )
+                Slider(
+                    value = fontScale,
+                    onValueChange = onFontScaleChange,
+                    onValueChangeFinished = onFontScaleCommit,
+                    valueRange = ZOOM_MIN..ZOOM_MAX,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .widthIn(min = 48.dp, max = 90.dp)
+                        .height(24.dp)
+                )
+                Text(
+                    text = "+",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.clickable {
+                        onFontScaleChange(fontScale + 0.1f)
+                        onFontScaleCommit()
+                    }
+                )
+                Text(
+                    text = "${(fontScale * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = onSurface,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(38.dp)
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
+internal fun NoteFileCard(
+    note: ParsedNote,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null,
+    /** Move the note to another folder (revealed on hover). */
+    onMove: (() -> Unit)? = null,
+    /** Rename the note without rewriting its first line (revealed on hover). */
+    onRename: (() -> Unit)? = null
+) {
+    val hoverSource = remember { MutableInteractionSource() }
+    val isHovered by hoverSource.collectIsHoveredAsState()
+    LaunchedEffect(isHovered) {
+        if (isHovered) {
+            delay(60.milliseconds)
+            SoundManager.play(SoundEvent.Hover)
+        }
+    }
+
+    Card(
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) activeChromeFill()
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .hoverable(hoverSource)
+            .clickable {
+                SoundManager.play(SoundEvent.Click)
+                onClick()
+            }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = note.title.ifBlank { note.fileName },
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                // Quick rename affordance, revealed on hover. Opens the
+                // rename dialog, which changes the note's display name
+                // WITHOUT rewriting the `# ` heading in the note body.
+                if (isHovered && onRename != null) {
+                    Text(
+                        text = "\u270E",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .clickable {
+                                SoundManager.play(SoundEvent.Click)
+                                onRename()
+                            }
+                    )
+                }
+                // Quick move-to-folder affordance, revealed on hover.
+                if (isHovered && onMove != null) {
+                    Text(
+                        text = "\u21F1",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .clickable {
+                                SoundManager.play(SoundEvent.Click)
+                                onMove()
+                            }
+                    )
+                }
+                // Quick delete affordance, revealed on hover. Routes into
+                // the same confirmation dialog as the EditorHeader button.
+                if (isHovered && onDelete != null) {
+                    Text(
+                        text = "\u00D7",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .clickable {
+                                SoundManager.play(SoundEvent.Click)
+                                onDelete()
+                            }
+                    )
+                }
+            }
+            Text(
+                text = note.fileName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+    }
+}
+

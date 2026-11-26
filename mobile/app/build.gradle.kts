@@ -53,8 +53,10 @@ android {
         applicationId = "com.jasonbible.phone"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "3.0.0-phone"
+        // Tracks the desktop release line: the shared data layer, theme
+        // and screens are the same code as v2.3.0 on main.
+        versionCode = 2300
+        versionName = "2.3.0"
     }
 
     signingConfigs {

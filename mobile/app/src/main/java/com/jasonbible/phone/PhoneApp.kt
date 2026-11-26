@@ -1,18 +1,8 @@
 package com.jasonbible.phone
 
-import android.app.Activity
-import android.content.Context
-import android.content.SharedPreferences
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,32 +12,31 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,1292 +45,680 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.io.File
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
+import data.AppUpdater
+import data.BibleCatalog
+import data.BibleRepository
+import data.NotesRepository
+import data.SettingsManager
+import data.SoundEvent
+import data.SoundManager
+import data.openExternalUrl
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import model.Book
+import model.ParsedNote
+import ui.BibleReferenceSelection
+import ui.BibleScreen
+import ui.CollectionsScreen
+import ui.GlobalSearchOverlay
+import ui.EmbeddedPlayer
+import ui.LexiconScreen
+import ui.NotesScreen
+import ui.SettingsScreen
+import ui.SplashScreen
+import ui.rememberAppSearchState
+import ui.StatisticsScreen
+import ui.VerseCompareScreen
+import platform.AppPlatform
 
-private enum class Screen { Home, Bible, Notes, Settings }
-
-private data class StudyProgress(
-    val oldTestament: Int,
-    val newTestament: Int,
-    val wholeBible: Int
-)
-
-/** How long typing must pause before the open note is written to disk. */
-private const val AUTO_SAVE_DELAY_MS = 600L
-
-private const val DAILY_VERSE =
-    "Thy word is a lamp unto my feet, and a light unto my path."
-private const val DAILY_REFERENCE = "Psalm 119:105 (KJV)"
-private const val APP_VERSION = "3.0.0-phone"
-
-private class ReadingProgress(context: Context) {
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences("reading-progress", Context.MODE_PRIVATE)
-
-    fun read(): Set<String> =
-        prefs.getStringSet("chapters", emptySet())?.toSet().orEmpty()
-
-    fun add(key: String): Set<String> {
-        val updated = read() + key
-        prefs.edit().putStringSet("chapters", updated).apply()
-        return updated
-    }
-}
 
 /**
- * The phone app opens on a single main menu: Bible, Notes, Settings and Quit,
- * with a daily verse and reading progress. The old three-page pager is gone.
+ * The phone edition of the app.
+ *
+ * The desktop's side-by-side Bible + editor becomes ONE horizontal pager.
+ * Swiping left/right moves between:
+ *
+ *     Books  ⇄  Chapters  ⇄  BIBLE  ⇄  EDITOR  ⇄  All notes
+ *
+ * i.e. swiping past the Bible continues into the chapter list and then the
+ * book list, and swiping past the editor reveals the notes library — the
+ * exact navigation the phone layout is meant to have. Everything else
+ * (theme, screens, editors, exports, media, settings) is the desktop code.
  */
 @Composable
 fun PhoneApp() {
-    var splashVisible by remember { mutableStateOf(true) }
+    // ---- Startup: warm the catalog + settings off the UI thread ----
+    var progress by remember { mutableStateOf(0f) }
+    var ready by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(1800)
-        splashVisible = false
+        withContext(Dispatchers.IO) {
+            SettingsManager.darkMode
+            BibleCatalog.normalizeSavedTranslation()
+            BibleCatalog.entries
+            BibleCatalog.nameToBookNumber
+            NotesRepository.notes
+        }
+        progress = 0.75f
+        withContext(Dispatchers.IO) { BibleRepository.loadBooks() }
+        SoundManager.init()
+        progress = 1f
+        SoundManager.play(SoundEvent.Boot)
+        ready = true
     }
-    if (splashVisible) {
-        SplashScreen()
+    if (!ready) {
+        SplashScreen(progress = progress)
         return
     }
 
-    val context = LocalContext.current
-    val activity = context as? Activity
-    val store = remember { NotesStore(File(context.filesDir, "notes")) }
-    val reading = remember { ReadingProgress(context) }
+    val pages = PhonePage.entries
+    val pager = rememberPagerState(initialPage = PhonePage.BIBLE.ordinal) { pages.size }
+    val scope = rememberCoroutineScope()
+    val appSearch = rememberAppSearchState()
 
-    var screen by remember { mutableStateOf(Screen.Home) }
-
-    var notes by remember { mutableStateOf(store.list()) }
-    var openFile by remember { mutableStateOf<File?>(null) }
-    var editorValue by remember { mutableStateOf(TextFieldValue("")) }
-    var workspaceStartPage by remember { mutableIntStateOf(1) }
-
-    var translation by remember { mutableStateOf(TRANSLATIONS.first()) }
+    // ---- Shared Bible location (drives Bible / Chapters / Books) ----
     var books by remember { mutableStateOf<List<Book>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
     var bookIndex by remember { mutableIntStateOf(0) }
     var chapterIndex by remember { mutableIntStateOf(0) }
-    var readChapters by remember { mutableStateOf(reading.read()) }
+    var bibleJumpKey by remember { mutableIntStateOf(0) }
+    var bibleReference by remember { mutableStateOf<BibleReferenceSelection?>(null) }
 
-    LaunchedEffect(translation) {
-        loading = true
-        val loaded = withContext(Dispatchers.IO) {
-            runCatching { BibleLibrary.books(context, translation) }
-                .getOrDefault(emptyList())
+    LaunchedEffect(SettingsManager.translation) {
+        books = withContext(Dispatchers.IO) {
+            runCatching { BibleRepository.loadBooks() }.getOrDefault(emptyList())
         }
-        books = loaded
-        bookIndex = bookIndex.coerceIn(0, (loaded.size - 1).coerceAtLeast(0))
+        bookIndex = bookIndex.coerceIn(0, (books.size - 1).coerceAtLeast(0))
         chapterIndex = chapterIndex.coerceIn(
             0,
-            (loaded.getOrNull(bookIndex)?.chapters?.size?.minus(1) ?: 0).coerceAtLeast(0)
+            (books.getOrNull(bookIndex)?.chapters?.size?.minus(1) ?: 0).coerceAtLeast(0)
         )
-        loading = false
     }
 
-    // Auto-save the open note once typing pauses.
-    LaunchedEffect(openFile, editorValue.text) {
-        val file = openFile ?: return@LaunchedEffect
-        if (store.read(file) == editorValue.text) return@LaunchedEffect
-        delay(AUTO_SAVE_DELAY_MS)
-        store.save(file, editorValue.text)
-        notes = store.list()
+    val currentBook = books.getOrNull(bookIndex)
+
+    fun goTo(page: PhonePage) {
+        scope.launch { pager.animateScrollToPage(page.ordinal) }
     }
 
-    fun saveOpenNote() {
-        openFile?.let { file ->
-            store.save(file, editorValue.text)
-            notes = store.list()
-        }
-    }
-
-    fun openNote(file: File) {
-        openFile = file
-        editorValue = TextFieldValue(store.read(file))
-        workspaceStartPage = 0
-        screen = Screen.Bible
-    }
-
-    fun createNote() {
-        val text = "# Untitled\n\n"
-        val file = store.save(null, text)
-        notes = store.list()
-        openFile = file
-        editorValue = TextFieldValue(text)
-        workspaceStartPage = 0
-        screen = Screen.Bible
-    }
-
-    fun deleteNote(file: File) {
-        store.delete(file)
-        if (openFile == file) {
-            openFile = null
-            editorValue = TextFieldValue("")
-        }
-        notes = store.list()
-    }
-
-    fun openPsalm119() {
-        val index = books.indexOfFirst { it.name.contains("Psalm", ignoreCase = true) }
-        if (index < 0) return
-        val target = books[index].chapters.indexOfFirst { it.number == 119 }
-        if (target < 0) return
-        bookIndex = index
-        chapterIndex = target
-        workspaceStartPage = 1
-        screen = Screen.Bible
-    }
-
-    fun backHome() {
-        saveOpenNote()
-        screen = Screen.Home
-    }
-
-    BackHandler(enabled = screen != Screen.Home) { backHome() }
-
-    when (screen) {
-        Screen.Home -> HomeScreen(
-            progress = studyProgress(books, readChapters),
-            onBible = {
-                workspaceStartPage = 1
-                screen = Screen.Bible
-            },
-            onNotes = { screen = Screen.Notes },
-            onSettings = { screen = Screen.Settings },
-            onQuit = { activity?.finishAffinity() },
-            onDailyVerse = ::openPsalm119
-        )
-
-        Screen.Bible -> WorkspaceScreen(
-            startPage = workspaceStartPage,
-            books = books,
-            loading = loading,
-            translation = translation,
-            onTranslationChange = { translation = it },
-            bookIndex = bookIndex,
-            chapterIndex = chapterIndex,
-            onBookChange = { index ->
-                bookIndex = index
-                chapterIndex = 0
-            },
-            onChapterChange = { chapterIndex = it },
-            editorValue = editorValue,
-            hasNote = openFile != null,
-            onEditorChange = { editorValue = it },
-            onFormat = { format -> editorValue = applyEditorFormat(editorValue, format) },
-            onNewNote = ::createNote,
-            onOpenNotes = { screen = Screen.Notes },
-            onBack = ::backHome,
-            onChapterRead = { book, chapter ->
-                val key = "${book.number}:${chapter.number}"
-                if (key !in readChapters) readChapters = reading.add(key)
+    fun openBible(reference: BibleReferenceSelection) {
+        bibleReference = reference
+        bibleJumpKey++
+        val index = books.indexOfFirst { it.name.equals(reference.book, ignoreCase = true) }
+        if (index >= 0) {
+            bookIndex = index
+            val chapter = reference.chapter
+            chapterIndex = if (chapter == null) 0 else {
+                books[index].chapters.indexOfFirst { it.chapter == chapter }
+                    .coerceAtLeast(0)
             }
-        )
-
-        Screen.Notes -> NotesScreen(
-            notes = notes,
-            onOpen = ::openNote,
-            onCreate = ::createNote,
-            onDelete = ::deleteNote,
-            onBack = ::backHome
-        )
-
-        Screen.Settings -> SettingsScreen(
-            translation = translation,
-            onTranslationChange = { translation = it },
-            onBack = { screen = Screen.Home }
-        )
-    }
-}
-
-private fun studyProgress(books: List<Book>, read: Set<String>): StudyProgress {
-    if (books.isEmpty()) return StudyProgress(0, 0, 0)
-
-    fun chaptersIn(books: List<Book>) = books.sumOf { it.chapters.size }
-    fun readIn(books: List<Book>) = books.sumOf { book ->
-        book.chapters.count { "${book.number}:${it.number}" in read }
-    }
-    fun percent(read: Int, total: Int) =
-        if (total == 0) 0 else (read * 100f / total).roundToInt()
-
-    val old = books.filter { it.number <= 39 }
-    val new = books.filter { it.number > 39 }
-    val oldRead = readIn(old)
-    val newRead = readIn(new)
-    return StudyProgress(
-        oldTestament = percent(oldRead, chaptersIn(old)),
-        newTestament = percent(newRead, chaptersIn(new)),
-        wholeBible = percent(oldRead + newRead, chaptersIn(books))
-    )
-}
-
-@Composable
-private fun SplashScreen() {
-    val logoAlpha = remember { Animatable(0f) }
-    val logoScale = remember { Animatable(0.72f) }
-    val titleAlpha = remember { Animatable(0f) }
-
-    LaunchedEffect(Unit) {
-        launch { logoAlpha.animateTo(1f, tween(durationMillis = 500)) }
-        launch {
-            titleAlpha.animateTo(
-                1f,
-                tween(durationMillis = 700, delayMillis = 250, easing = FastOutSlowInEasing)
-            )
         }
-        logoScale.animateTo(
-            1f,
-            tween(durationMillis = 850, easing = FastOutSlowInEasing)
-        )
+        goTo(PhonePage.BIBLE)
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(
-                painter = painterResource(R.drawable.logo),
-                contentDescription = "JasonBible",
-                modifier = Modifier
-                    .size(148.dp)
-                    .graphicsLayer {
-                        scaleX = logoScale.value
-                        scaleY = logoScale.value
-                        alpha = logoAlpha.value
+    // ---- Editor / notes state ----
+    var selectedNoteFile by remember { mutableStateOf<String?>(null) }
+    var notes by remember { mutableStateOf<List<ParsedNote>>(emptyList()) }
+    fun refreshNotes() {
+        notes = runCatching { NotesRepository.listFiles() }.getOrDefault(emptyList())
+    }
+    LaunchedEffect(Unit) { refreshNotes() }
+
+    fun openNote(fileName: String) {
+        selectedNoteFile = fileName
+        refreshNotes()
+        goTo(PhonePage.EDITOR)
+    }
+
+    fun newNote() {
+        val note = NotesRepository.createNote()
+        refreshNotes()
+        selectedNoteFile = note.fileName
+        goTo(PhonePage.EDITOR)
+    }
+
+    // ---- Full-screen overlays from the desktop main menu ----
+    var overlay by remember { mutableStateOf<PhoneOverlay?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var compareReference by remember { mutableStateOf<BibleReferenceSelection?>(null) }
+    var lexiconQuery by remember { mutableStateOf<String?>(null) }
+
+    BackHandler(enabled = overlay != null || pager.currentPage != PhonePage.BIBLE.ordinal) {
+        when {
+            overlay != null -> overlay = null
+            pager.currentPage > PhonePage.BIBLE.ordinal ->
+                scope.launch { pager.animateScrollToPage(pager.currentPage - 1) }
+            else -> scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            PhoneTopBar(
+                page = pages[pager.currentPage],
+                onSearch = { appSearch.openSearch() },
+                onMenu = { menuOpen = true },
+                menuOpen = menuOpen,
+                onDismissMenu = { menuOpen = false },
+                onNotes = { goTo(PhonePage.NOTES) },
+                onSettings = { overlay = PhoneOverlay.SETTINGS },
+                onStatistics = { overlay = PhoneOverlay.STATISTICS },
+                onCollections = { overlay = PhoneOverlay.COLLECTIONS },
+                onLexicon = {
+                    lexiconQuery = null
+                    overlay = PhoneOverlay.LEXICON
+                },
+                onCompare = {
+                    compareReference = currentBook?.let { book ->
+                        BibleReferenceSelection(
+                            book = book.name,
+                            chapter = book.chapters.getOrNull(chapterIndex)?.chapter,
+                            verse = 1
+                        )
                     }
+                    overlay = PhoneOverlay.COMPARE
+                },
+                onCheckUpdates = {
+                    scope.launch {
+                        val release = runCatching { AppUpdater.checkForUpdate() }.getOrNull()
+                        if (release == null) {
+                            AppPlatform.toast("BibleApp is up to date.")
+                        } else {
+                            val started = runCatching {
+                                AppUpdater.installAndRestart(release)
+                            }.getOrDefault(false)
+                            if (!started) openExternalUrl(release.pageUrl)
+                        }
+                    }
+                }
             )
-            Spacer(Modifier.height(24.dp))
-            Text(
-                text = "HOLY BIBLE",
-                color = MaterialTheme.colorScheme.primary,
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Bold,
-                fontSize = 28.sp,
-                letterSpacing = 3.sp,
-                modifier = Modifier.graphicsLayer { alpha = titleAlpha.value }
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
             )
-        }
-        CircularProgressIndicator(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 84.dp)
-                .size(22.dp),
-            color = MaterialTheme.colorScheme.primary,
-            strokeWidth = 2.dp
-        )
-    }
-}
 
-@Composable
-private fun HomeScreen(
-    progress: StudyProgress,
-    onBible: () -> Unit,
-    onNotes: () -> Unit,
-    onSettings: () -> Unit,
-    onQuit: () -> Unit,
-    onDailyVerse: () -> Unit
-) {
-    val gold = MaterialTheme.colorScheme.primary
-    val cream = MaterialTheme.colorScheme.onBackground
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                beyondViewportPageCount = 1
+            ) { index ->
+                when (pages[index]) {
+                    PhonePage.BOOKS -> BookListPage(
+                        books = books,
+                        onPick = { indexInBible ->
+                            bookIndex = indexInBible
+                            chapterIndex = 0
+                            goTo(PhonePage.CHAPTERS)
+                        }
+                    )
 
-    Box(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Spacer(Modifier.height(8.dp))
-        CrossMark(
-            color = gold,
-            modifier = Modifier.width(24.dp).height(34.dp)
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = "HOLY BIBLE",
-            color = gold,
-            fontFamily = FontFamily.Serif,
-            fontWeight = FontWeight.Bold,
-            fontSize = 33.sp,
-            letterSpacing = 3.sp
-        )
-        Spacer(Modifier.height(26.dp))
+                    PhonePage.CHAPTERS -> ChapterListPage(
+                        book = currentBook,
+                        onPick = { picked ->
+                            chapterIndex = picked
+                            currentBook?.let { book ->
+                                val chapter = book.chapters.getOrNull(picked)
+                                if (chapter != null) {
+                                    bibleReference = BibleReferenceSelection(
+                                        book = book.name,
+                                        chapter = chapter.chapter,
+                                        verse = 1
+                                    )
+                                }
+                            }
+                            bibleJumpKey++
+                            goTo(PhonePage.BIBLE)
+                        }
+                    )
 
-        DailyVerseCard(onClick = onDailyVerse)
-        Spacer(Modifier.height(24.dp))
+                    PhonePage.BIBLE -> key(bibleJumpKey) {
+                        BibleScreen(
+                            back = {},
+                            initialReference = bibleReference,
+                            showBackButton = false,
+                            compact = false,
+                            onOpenNoteTitle = { title, _ ->
+                                NotesRepository.findByTitle(title)?.let { note ->
+                                    openNote(note.fileName)
+                                }
+                            },
+                            onOpenLexicon = { number ->
+                                lexiconQuery = number
+                                overlay = PhoneOverlay.LEXICON
+                            },
+                            onOpenCompare = { bookName, chapter, verse ->
+                                compareReference = BibleReferenceSelection(
+                                    book = bookName,
+                                    chapter = chapter,
+                                    verse = verse
+                                )
+                                overlay = PhoneOverlay.COMPARE
+                            }
+                        )
+                    }
 
-        MenuButton("Bible", filled = true, icon = { BookIcon(it) }, onClick = onBible)
-        Spacer(Modifier.height(12.dp))
-        MenuButton("Notes", filled = false, icon = { PencilIcon(it) }, onClick = onNotes)
-        Spacer(Modifier.height(12.dp))
-        MenuButton("Settings", filled = false, icon = { SlidersIcon(it) }, onClick = onSettings)
-        Spacer(Modifier.height(12.dp))
-        MenuButton("Quit", filled = false, icon = { ExitIcon(it) }, onClick = onQuit)
+                    PhonePage.EDITOR -> NotesScreen(
+                        back = {},
+                        selectedFileName = selectedNoteFile,
+                        showBackButton = false,
+                        compact = true,
+                        onOpenBibleReference = { reference -> openBible(reference) },
+                        onSelectedNoteChange = { fileName ->
+                            selectedNoteFile = fileName
+                            refreshNotes()
+                        }
+                    )
 
-        Spacer(Modifier.height(30.dp))
-        Text(
-            text = "STUDY PROGRESS",
-            color = gold,
-            fontSize = 11.sp,
-            letterSpacing = 2.5.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(Modifier.height(18.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            ProgressRing(progress.oldTestament, "Old Testament", Modifier.weight(1f))
-            ProgressRing(progress.newTestament, "New Testament", Modifier.weight(1f))
-            ProgressRing(progress.wholeBible, "Whole Bible", Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(20.dp))
-        Text(
-            text = "Read a chapter to grow your progress.",
-            color = cream.copy(alpha = 0.55f),
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center
-        )
-            Spacer(Modifier.height(8.dp))
-        }
-
-        Text(
-            text = "v$APP_VERSION",
-            color = cream.copy(alpha = 0.5f),
-            fontSize = 10.sp,
-            letterSpacing = 1.sp,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 18.dp)
-        )
-    }
-}
-
-@Composable
-private fun DailyVerseCard(onClick: () -> Unit) {
-    val gold = MaterialTheme.colorScheme.primary
-    val cream = MaterialTheme.colorScheme.onBackground
-    val shape = RoundedCornerShape(16.dp)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .border(1.dp, gold.copy(alpha = 0.8f), shape)
-            .padding(horizontal = 18.dp, vertical = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "DAILY VERSE",
-            color = gold,
-            fontSize = 10.sp,
-            letterSpacing = 2.5.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = "\u201C$DAILY_VERSE\u201D",
-            color = cream,
-            fontFamily = FontFamily.Serif,
-            fontStyle = FontStyle.Italic,
-            fontSize = 19.sp,
-            lineHeight = 27.sp,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(14.dp))
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .clickable(onClick = onClick)
-                .padding(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = DAILY_REFERENCE,
-                color = gold,
-                fontFamily = FontFamily.Serif,
-                fontSize = 13.sp,
-                textDecoration = TextDecoration.Underline
-            )
-            Text(
-                text = "  \u2192",
-                color = gold,
-                fontFamily = FontFamily.Serif,
-                fontSize = 13.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun MenuButton(
-    label: String,
-    filled: Boolean,
-    icon: @Composable (Color) -> Unit,
-    onClick: () -> Unit
-) {
-    val shape = RoundedCornerShape(12.dp)
-    val gold = MaterialTheme.colorScheme.primary
-    val contentColor = if (filled) MaterialTheme.colorScheme.onPrimary else gold
-    val background = if (filled) gold else Color.Transparent
-    val borderColor = if (filled) Color.Transparent else gold.copy(alpha = 0.75f)
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(60.dp)
-            .clip(shape)
-            .background(background)
-            .border(1.dp, borderColor, shape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        icon(contentColor)
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = label.uppercase(),
-            color = contentColor,
-            fontFamily = FontFamily.Serif,
-            fontWeight = FontWeight.Medium,
-            fontSize = 18.sp,
-            letterSpacing = 1.5.sp
-        )
-    }
-}
-
-@Composable
-private fun ProgressRing(percent: Int, label: String, modifier: Modifier = Modifier) {
-    val gold = MaterialTheme.colorScheme.primary
-    val track = MaterialTheme.colorScheme.surfaceVariant
-    val cream = MaterialTheme.colorScheme.onBackground
-
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier.size(82.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(Modifier.fillMaxSize()) {
-                val stroke = 6.dp.toPx()
-                drawArc(
-                    color = track,
-                    startAngle = -90f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    style = Stroke(width = stroke, cap = StrokeCap.Round)
-                )
-                if (percent > 0) {
-                    drawArc(
-                        color = gold,
-                        startAngle = -90f,
-                        sweepAngle = 360f * percent / 100f,
-                        useCenter = false,
-                        style = Stroke(width = stroke, cap = StrokeCap.Round)
+                    PhonePage.NOTES -> NotesLibraryPage(
+                        notes = notes,
+                        selectedFileName = selectedNoteFile,
+                        onOpen = { openNote(it) },
+                        onCreate = { newNote() },
+                        onDelete = { note ->
+                            NotesRepository.deleteNote(note.fileName)
+                            if (selectedNoteFile == note.fileName) selectedNoteFile = null
+                            refreshNotes()
+                        }
                     )
                 }
             }
-            Text(
-                text = "$percent%",
-                color = cream,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
+
+            PhonePageIndicator(
+                current = pager.currentPage,
+                pages = pages,
+                onSelect = { goTo(it) }
             )
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = label,
-            color = cream,
-            fontFamily = FontFamily.Serif,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
 
-@Composable
-private fun ScreenHeader(
-    title: String,
-    onBack: () -> Unit,
-    actionLabel: String? = null,
-    onAction: (() -> Unit)? = null
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        TextButton(onClick = onBack) {
-            Text(
-                text = "\u2039",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 28.sp,
-                lineHeight = 28.sp
+        // The desktop's embedded player floats above every screen.
+        EmbeddedPlayer(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 12.dp, bottom = 56.dp)
+        )
+
+        if (appSearch.open) {
+            GlobalSearchOverlay(
+                state = appSearch,
+                onOpenReference = { reference ->
+                    appSearch.close()
+                    openBible(reference)
+                },
+                onOpenNoteHit = { hit ->
+                    appSearch.close()
+                    openNote(hit.note.fileName)
+                },
+                onOpenSettings = {
+                    appSearch.close()
+                    overlay = PhoneOverlay.SETTINGS
+                }
             )
         }
-        Text(
-            text = title,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontFamily = FontFamily.Serif,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
-        if (actionLabel != null && onAction != null) {
-            TextButton(onClick = onAction) {
-                Text(actionLabel, color = MaterialTheme.colorScheme.primary)
-            }
-        }
-    }
-}
 
-private enum class EditorFormat { Heading, Bold, Italic, Quote, List, Highlight }
-
-private fun applyEditorFormat(value: TextFieldValue, format: EditorFormat): TextFieldValue {
-    val text = value.text
-    val start = min(value.selection.start, value.selection.end).coerceIn(0, text.length)
-    val end = max(value.selection.start, value.selection.end).coerceIn(0, text.length)
-
-    fun wrap(prefix: String, suffix: String): TextFieldValue {
-        val selected = text.substring(start, end)
-        val updated = text.substring(0, start) + prefix + selected + suffix + text.substring(end)
-        return TextFieldValue(updated, TextRange(start + prefix.length, end + prefix.length))
-    }
-
-    fun linePrefix(prefix: String): TextFieldValue {
-        val lineStart = text.lastIndexOf('\n', (start - 1).coerceAtLeast(0))
-            .let { if (it < 0) 0 else it + 1 }
-        val updated = text.substring(0, lineStart) + prefix + text.substring(lineStart)
-        return TextFieldValue(updated, TextRange(start + prefix.length, end + prefix.length))
-    }
-
-    return when (format) {
-        EditorFormat.Heading -> linePrefix("# ")
-        EditorFormat.Quote -> linePrefix("> ")
-        EditorFormat.List -> linePrefix("- ")
-        EditorFormat.Bold -> wrap("**", "**")
-        EditorFormat.Italic -> wrap("*", "*")
-        EditorFormat.Highlight -> wrap("==", "==")
-    }
-}
-
-@Composable
-private fun WorkspaceScreen(
-    startPage: Int,
-    books: List<Book>,
-    loading: Boolean,
-    translation: Translation,
-    onTranslationChange: (Translation) -> Unit,
-    bookIndex: Int,
-    chapterIndex: Int,
-    onBookChange: (Int) -> Unit,
-    onChapterChange: (Int) -> Unit,
-    editorValue: TextFieldValue,
-    hasNote: Boolean,
-    onEditorChange: (TextFieldValue) -> Unit,
-    onFormat: (EditorFormat) -> Unit,
-    onNewNote: () -> Unit,
-    onOpenNotes: () -> Unit,
-    onBack: () -> Unit,
-    onChapterRead: (Book, Chapter) -> Unit
-) {
-    val pager = rememberPagerState(initialPage = startPage.coerceIn(0, 1)) { 2 }
-    val scope = rememberCoroutineScope()
-
-    Column(
-        modifier = Modifier.fillMaxSize().statusBarsPadding()
-    ) {
-        WorkspaceHeader(
-            page = pager.currentPage,
-            onBack = onBack,
-            onNotes = onOpenNotes,
-            onPage = { page -> scope.launch { pager.animateScrollToPage(page) } }
-        )
-
-        HorizontalPager(
-            state = pager,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            beyondViewportPageCount = 1
-        ) { page ->
-            if (page == 0) {
-                EditorWorkspace(
-                    value = editorValue,
-                    hasNote = hasNote,
-                    onChange = onEditorChange,
-                    onFormat = onFormat,
-                    onNewNote = onNewNote,
-                    onOpenNotes = onOpenNotes
-                )
-            } else {
-                BiblePane(
-                    books = books,
-                    loading = loading,
-                    translation = translation,
-                    onTranslationChange = onTranslationChange,
-                    bookIndex = bookIndex,
-                    chapterIndex = chapterIndex,
-                    onBookChange = onBookChange,
-                    onChapterChange = onChapterChange
-                )
+        overlay?.let { active ->
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                when (active) {
+                    PhoneOverlay.SETTINGS -> SettingsScreen(back = { overlay = null })
+                    PhoneOverlay.STATISTICS -> StatisticsScreen(back = { overlay = null })
+                    PhoneOverlay.COLLECTIONS -> CollectionsScreen(
+                        back = { overlay = null },
+                        onOpenVerse = { bookName, chapter, verse ->
+                            overlay = null
+                            openBible(
+                                BibleReferenceSelection(bookName, chapter, verse)
+                            )
+                        }
+                    )
+                    PhoneOverlay.LEXICON -> LexiconScreen(
+                        initialQuery = lexiconQuery,
+                        onInitialQueryConsumed = { lexiconQuery = null },
+                        onOpenVerse = { book, chapter, verse ->
+                            overlay = null
+                            openBible(BibleReferenceSelection(book, chapter, verse))
+                        },
+                        onBack = { overlay = null }
+                    )
+                    PhoneOverlay.COMPARE -> VerseCompareScreen(
+                        initialReference = compareReference,
+                        back = { overlay = null }
+                    )
+                }
             }
         }
     }
 
-    LaunchedEffect(pager.currentPage, books, bookIndex, chapterIndex) {
-        if (pager.currentPage != 1) return@LaunchedEffect
-        val book = books.getOrNull(bookIndex) ?: return@LaunchedEffect
-        val chapter = book.chapters.getOrNull(chapterIndex) ?: return@LaunchedEffect
-        onChapterRead(book, chapter)
-    }
 }
 
+
+private enum class PhoneOverlay { SETTINGS, STATISTICS, COLLECTIONS, LEXICON, COMPARE }
+
+
+/** Pager order: swiping left from the Bible reveals chapters, then books;
+ *  swiping right from the editor reveals the whole notes library. */
+internal enum class PhonePage(val label: String) {
+    BOOKS("Books"),
+    CHAPTERS("Chapters"),
+    BIBLE("Bible"),
+    EDITOR("Editor"),
+    NOTES("Notes")
+}
+
+
 @Composable
-private fun WorkspaceHeader(
-    page: Int,
-    onBack: () -> Unit,
+private fun PhoneTopBar(
+    page: PhonePage,
+    onSearch: () -> Unit,
+    menuOpen: Boolean,
+    onMenu: () -> Unit,
+    onDismissMenu: () -> Unit,
     onNotes: () -> Unit,
-    onPage: (Int) -> Unit
+    onSettings: () -> Unit,
+    onStatistics: () -> Unit,
+    onCollections: () -> Unit,
+    onLexicon: () -> Unit,
+    onCompare: () -> Unit,
+    onCheckUpdates: () -> Unit
 ) {
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(onClick = onBack) {
-                Text(
-                    text = "\u2039",
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 28.sp,
-                    lineHeight = 28.sp
-                )
-            }
-            WorkspaceTab("Editor", page == 0) { onPage(0) }
-            WorkspaceTab("Bible", page == 1) { onPage(1) }
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onNotes) {
-                Text("Notes", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
-            }
-        }
-        HorizontalDivider()
-    }
-}
-
-@Composable
-private fun WorkspaceTab(text: String, selected: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
-        Text(
-            text = text,
-            color = if (selected) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-        )
-    }
-}
-
-@Composable
-private fun EditorWorkspace(
-    value: TextFieldValue,
-    hasNote: Boolean,
-    onChange: (TextFieldValue) -> Unit,
-    onFormat: (EditorFormat) -> Unit,
-    onNewNote: () -> Unit,
-    onOpenNotes: () -> Unit
-) {
-    if (!hasNote) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "No note open",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Text(
-                text = "Open a note or start a new one.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onNewNote) { Text("New note") }
-                TextButton(onClick = onOpenNotes) { Text("Open notes") }
-            }
-        }
-        return
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        EditorToolbar(onFormat)
-        HorizontalDivider()
-        OutlinedTextField(
-            value = value,
-            onValueChange = onChange,
-            modifier = Modifier.fillMaxSize().padding(12.dp),
-            textStyle = MaterialTheme.typography.bodyLarge,
-            label = { Text("Note") }
-        )
-    }
-}
-
-@Composable
-private fun EditorToolbar(onFormat: (EditorFormat) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        ToolbarAction("H1") { onFormat(EditorFormat.Heading) }
-        ToolbarAction("B") { onFormat(EditorFormat.Bold) }
-        ToolbarAction("I") { onFormat(EditorFormat.Italic) }
-        ToolbarAction("\u201C \u201D") { onFormat(EditorFormat.Quote) }
-        ToolbarAction("\u2022") { onFormat(EditorFormat.List) }
-        ToolbarAction("==") { onFormat(EditorFormat.Highlight) }
-    }
-}
-
-@Composable
-private fun ToolbarAction(label: String, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = label,
-            color = MaterialTheme.colorScheme.primary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium
+            text = page.label,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontFamily = FontFamily.Serif
+            ),
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+        Spacer(Modifier.weight(1f))
+
+        TextButton(onClick = onSearch) {
+            Text("Search", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+        }
+        TextButton(onClick = onNotes) {
+            Text("Notes", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+        }
+
+        Box {
+            TextButton(onClick = onMenu) {
+                Text("\u2630", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = onDismissMenu) {
+                DropdownMenuItem(
+                    text = { Text("Settings") },
+                    onClick = { onDismissMenu(); onSettings() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Reading statistics") },
+                    onClick = { onDismissMenu(); onStatistics() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Collections") },
+                    onClick = { onDismissMenu(); onCollections() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Word study") },
+                    onClick = { onDismissMenu(); onLexicon() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Compare translations") },
+                    onClick = { onDismissMenu(); onCompare() }
+                )
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("Check for updates") },
+                    onClick = { onDismissMenu(); onCheckUpdates() }
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun PhonePageIndicator(
+    current: Int,
+    pages: List<PhonePage>,
+    onSelect: (PhonePage) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        pages.forEachIndexed { index, page ->
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 5.dp)
+                    .size(if (index == current) 9.dp else 7.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (index == current) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        }
+                    )
+                    .clickable { onSelect(page) }
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun BookListPage(
+    books: List<Book>,
+    onPick: (Int) -> Unit
+) {
+    if (books.isEmpty()) {
+        EmptyPage("Loading the Bible…")
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        item {
+            PageHeading("Old Testament")
+        }
+        items(books.take(39).mapIndexed { index, book -> index to book }) { (index, book) ->
+            BookRow(book, onPick = { onPick(index) })
+        }
+        item {
+            Spacer(Modifier.height(16.dp))
+            PageHeading("New Testament")
+        }
+        items(
+            books.drop(39).mapIndexed { offset, book -> (offset + 39) to book }
+        ) { (index, book) ->
+            BookRow(book, onPick = { onPick(index) })
+        }
+    }
+}
+
+
+@Composable
+private fun BookRow(book: Book, onPick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onPick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = book.name,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = "${book.chapters.size}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
-@Composable
-private fun NotesScreen(
-    notes: List<NoteFile>,
-    onOpen: (File) -> Unit,
-    onCreate: () -> Unit,
-    onDelete: (File) -> Unit,
-    onBack: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxSize().statusBarsPadding()
-    ) {
-        ScreenHeader(
-            title = "Notes",
-            onBack = onBack,
-            actionLabel = "+ New",
-            onAction = onCreate
-        )
 
-        if (notes.isEmpty()) {
+@Composable
+private fun ChapterListPage(
+    book: Book?,
+    onPick: (Int) -> Unit
+) {
+    if (book == null) {
+        EmptyPage("Pick a book first.")
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 68.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+            PageHeading(book.name)
+        }
+        items(book.chapters.size) { index ->
+            val chapter = book.chapters[index]
             Box(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
+                modifier = Modifier
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .clickable { onPick(index) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "No notes yet. Tap + New to start one.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
+                    text = chapter.chapter.toString(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                items(notes) { note ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onOpen(note.file) }
-                            .padding(horizontal = 12.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = note.title,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            style = MaterialTheme.typography.bodyLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = "\u2715",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .clickable { onDelete(note.file) }
-                                .padding(8.dp)
-                        )
-                    }
-                }
-            }
         }
     }
 }
 
+
 @Composable
-private fun SettingsScreen(
-    translation: Translation,
-    onTranslationChange: (Translation) -> Unit,
-    onBack: () -> Unit
+private fun NotesLibraryPage(
+    notes: List<ParsedNote>,
+    selectedFileName: String?,
+    onOpen: (String) -> Unit,
+    onCreate: () -> Unit,
+    onDelete: (ParsedNote) -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize().statusBarsPadding()
-    ) {
-        ScreenHeader(title = "Settings", onBack = onBack)
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = "Bible translation",
-                color = MaterialTheme.colorScheme.onBackground,
-                fontFamily = FontFamily.Serif,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = "Choose the text shown in the Bible tab.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp
-            )
-
-            TRANSLATIONS.forEach { item ->
-                val selected = item.id == translation.id
-                val shape = RoundedCornerShape(12.dp)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(shape)
-                        .border(
-                            1.dp,
-                            if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.outline
-                            },
-                            shape
-                        )
-                        .clickable { onTranslationChange(item) }
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = selected,
-                        onClick = { onTranslationChange(item) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = MaterialTheme.colorScheme.primary,
-                            unselectedColor = MaterialTheme.colorScheme.outline
-                        )
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = item.label,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Text(
-                            text = item.shortLabel,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "About",
-                color = MaterialTheme.colorScheme.onBackground,
-                fontFamily = FontFamily.Serif,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = "JasonBible Phone \u00b7 v$APP_VERSION",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp
-            )
-            Text(
-                text = "Offline KJV, Luther 1912, Greek and Hebrew. Notes stay on this device.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun CrossMark(color: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val stroke = size.width * 0.15f
-        drawLine(
-            color = color,
-            start = Offset(size.width / 2f, 0f),
-            end = Offset(size.width / 2f, size.height),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(0f, size.height * 0.34f),
-            end = Offset(size.width, size.height * 0.34f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-    }
-}
-
-@Composable
-private fun BookIcon(color: Color) {
-    Canvas(Modifier.size(24.dp)) {
-        val w = size.width
-        val h = size.height
-        val stroke = 1.8.dp.toPx()
-        val left = Path().apply {
-            moveTo(w * 0.08f, h * 0.24f)
-            quadraticBezierTo(w * 0.28f, h * 0.13f, w * 0.48f, h * 0.26f)
-            lineTo(w * 0.48f, h * 0.9f)
-            quadraticBezierTo(w * 0.28f, h * 0.78f, w * 0.08f, h * 0.86f)
-            close()
-        }
-        val right = Path().apply {
-            moveTo(w * 0.52f, h * 0.26f)
-            quadraticBezierTo(w * 0.72f, h * 0.13f, w * 0.92f, h * 0.24f)
-            lineTo(w * 0.92f, h * 0.86f)
-            quadraticBezierTo(w * 0.72f, h * 0.78f, w * 0.52f, h * 0.9f)
-            close()
-        }
-        drawPath(left, color, style = Stroke(stroke, cap = StrokeCap.Round))
-        drawPath(right, color, style = Stroke(stroke, cap = StrokeCap.Round))
-        drawLine(
-            color = color,
-            start = Offset(w * 0.5f, h * 0.26f),
-            end = Offset(w * 0.5f, h * 0.9f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-    }
-}
-
-@Composable
-private fun PencilIcon(color: Color) {
-    Canvas(Modifier.size(24.dp)) {
-        val w = size.width
-        val h = size.height
-        val stroke = 1.8.dp.toPx()
-        rotate(degrees = -45f) {
-            drawRoundRect(
-                color = color,
-                topLeft = Offset(w * 0.42f, h * 0.08f),
-                size = Size(w * 0.16f, h * 0.56f),
-                cornerRadius = CornerRadius(w * 0.08f),
-                style = Stroke(stroke)
-            )
-            drawLine(
-                color = color,
-                start = Offset(w * 0.42f, h * 0.64f),
-                end = Offset(w * 0.5f, h * 0.9f),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = color,
-                start = Offset(w * 0.58f, h * 0.64f),
-                end = Offset(w * 0.5f, h * 0.9f),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round
-            )
-        }
-    }
-}
-
-@Composable
-private fun SlidersIcon(color: Color) {
-    Canvas(Modifier.size(24.dp)) {
-        val w = size.width
-        val h = size.height
-        val stroke = 1.8.dp.toPx()
-        val positions = listOf(0.38f, 0.62f, 0.46f)
-        positions.forEachIndexed { index, fraction ->
-            val y = h * (0.25f + index * 0.25f)
-            drawLine(
-                color = color,
-                start = Offset(w * 0.12f, y),
-                end = Offset(w * 0.88f, y),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round
-            )
-            drawCircle(
-                color = color,
-                radius = 3.dp.toPx(),
-                center = Offset(w * fraction, y),
-                style = Stroke(stroke)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ExitIcon(color: Color) {
-    Canvas(Modifier.size(24.dp)) {
-        val w = size.width
-        val h = size.height
-        val stroke = 1.8.dp.toPx()
-        drawLine(
-            color = color,
-            start = Offset(w * 0.16f, h * 0.14f),
-            end = Offset(w * 0.16f, h * 0.86f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(w * 0.16f, h * 0.14f),
-            end = Offset(w * 0.44f, h * 0.14f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(w * 0.16f, h * 0.86f),
-            end = Offset(w * 0.44f, h * 0.86f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(w * 0.42f, h * 0.5f),
-            end = Offset(w * 0.86f, h * 0.5f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(w * 0.7f, h * 0.34f),
-            end = Offset(w * 0.86f, h * 0.5f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = color,
-            start = Offset(w * 0.7f, h * 0.66f),
-            end = Offset(w * 0.86f, h * 0.5f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-    }
-}
-
-@Composable
-private fun BiblePane(
-    books: List<Book>,
-    loading: Boolean,
-    translation: Translation,
-    onTranslationChange: (Translation) -> Unit,
-    bookIndex: Int,
-    chapterIndex: Int,
-    onBookChange: (Int) -> Unit,
-    onChapterChange: (Int) -> Unit
-) {
-    if (loading) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
-        return
-    }
-    if (books.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No Bible translation could be loaded.",
-                style = MaterialTheme.typography.bodyMedium
-            )
-        }
-        return
-    }
-
-    val book = books[bookIndex.coerceIn(books.indices)]
-    val chapterIdx = chapterIndex.coerceIn(book.chapters.indices)
-    val chapter = book.chapters[chapterIdx]
-    val rtl = translation.id == "hebrew"
-
-    var bookMenu by remember { mutableStateOf(false) }
-    var translationMenu by remember { mutableStateOf(false) }
-
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box {
-                TextButton(onClick = { bookMenu = true }) {
-                    Text(
-                        text = book.name,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.width(170.dp)
-                    )
-                    Text(" \u25be")
-                }
-                DropdownMenu(expanded = bookMenu, onDismissRequest = { bookMenu = false }) {
-                    books.forEachIndexed { index, item ->
-                        DropdownMenuItem(
-                            text = { Text(item.name) },
-                            onClick = {
-                                onBookChange(index)
-                                bookMenu = false
-                            }
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            Box {
-                TextButton(onClick = { translationMenu = true }) {
-                    Text(translation.shortLabel)
-                }
-                DropdownMenu(
-                    expanded = translationMenu,
-                    onDismissRequest = { translationMenu = false }
-                ) {
-                    TRANSLATIONS.forEach { item ->
-                        DropdownMenuItem(
-                            text = { Text(item.label) },
-                            onClick = {
-                                onTranslationChange(item)
-                                translationMenu = false
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp)
-        ) {
-            items(book.chapters.size) { index ->
-                FilterChip(
-                    selected = index == chapterIdx,
-                    onClick = { onChapterChange(index) },
-                    label = { Text(book.chapters[index].number.toString()) }
-                )
-            }
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(top = 6.dp))
-
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            item {
-                Text(
-                    text = "${book.name} ${chapter.number}",
-                    style = MaterialTheme.typography.titleLarge,
-                    textAlign = if (rtl) TextAlign.Right else TextAlign.Start,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            items(chapter.verses) { verse ->
-                Row(verticalAlignment = Alignment.Top) {
-                    if (!rtl) {
-                        Text(
-                            text = verse.number.toString(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.width(30.dp).padding(top = 3.dp)
-                        )
-                    }
-                    Text(
-                        text = verse.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        textAlign = if (rtl) TextAlign.Right else TextAlign.Start,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (rtl) {
-                        Text(
-                            text = verse.number.toString(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.width(30.dp).padding(top = 3.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(
-                enabled = chapterIdx > 0,
-                onClick = { onChapterChange(chapterIdx - 1) }
-            ) { Text("\u2039 Prev") }
-            Spacer(Modifier.weight(1f))
             Text(
-                text = "Chapter ${chapter.number}",
+                text = "${notes.size} note${if (notes.size == 1) "" else "s"}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.weight(1f))
-            TextButton(
-                enabled = chapterIdx < book.chapters.size - 1,
-                onClick = { onChapterChange(chapterIdx + 1) }
-            ) { Text("Next \u203a") }
+            TextButton(onClick = onCreate) { Text("+ New note") }
         }
+        if (notes.isEmpty()) {
+            EmptyPage("No notes yet. Tap + New note to start one.")
+            return
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            items(notes, key = { it.fileName }) { note ->
+                val selected = note.fileName == selectedFileName
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (selected) {
+                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                            } else {
+                                androidx.compose.ui.graphics.Color.Transparent
+                            }
+                        )
+                        .clickable { onOpen(note.fileName) }
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = note.title.ifBlank { note.fileName.removeSuffix(".note") },
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (note.folder.isNotBlank()) {
+                            Text(
+                                text = note.folder,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Text(
+                        text = "\\u2715",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clickable { onDelete(note) }
+                            .padding(8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun PageHeading(text: String) {
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.6.sp),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+    )
+}
+
+
+@Composable
+private fun EmptyPage(message: String) {
+    Box(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
     }
 }
