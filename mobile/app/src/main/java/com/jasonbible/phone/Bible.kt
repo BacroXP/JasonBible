@@ -15,7 +15,9 @@ data class Translation(
 /** The translations bundled into the phone app's APK. */
 val TRANSLATIONS = listOf(
     Translation("kjv", "King James Version", "KJV", "bible/kjv.json"),
-    Translation("luther1912", "Luther 1912 (DE)", "LUT", "bible/luther_1912.json")
+    Translation("luther1912", "Luther 1912 (DE)", "LUT", "bible/luther_1912.json"),
+    Translation("greek", "Greek \u2014 Textus Receptus", "GRC", "bible/tr.json"),
+    Translation("hebrew", "Hebrew \u2014 Westminster Leningrad Codex", "HEB", "bible/wlc.json")
 )
 
 data class Verse(val number: Int, val text: String)
