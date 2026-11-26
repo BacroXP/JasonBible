@@ -3,8 +3,10 @@ name: Phone APK release
 # Builds the Android app from this branch and replaces the asset on the
 # rolling "phone-latest" release. The landing page links straight to
 #   https://github.com/BacroXP/JasonBible/releases/download/phone-latest/JasonBible-phone.apk
-# because the APK (147 MB) is far past GitHub's 100 MB limit for files in
-# the repository, so it can never live on gh-pages.
+# so the APK lives on a release instead of in the repository.
+#
+# The app bundles only KJV and the Hebrew WLC (~13 MB); the other 88 modules
+# are published by the "Translations release" workflow.
 
 on:
   push:
@@ -31,8 +33,22 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
 
-      - uses: android-actions/setup-android@v3
+      # The runner image ships the SDK; the setup-android action has been
+      # failing here, so point Gradle at the preinstalled copy instead.
+      - name: Locate the preinstalled Android SDK
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK_ROOT" ]; then
+            echo "::error::Android SDK not found at $SDK_ROOT"
+            exit 1
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/build-tools/35.0.0" >> "$GITHUB_PATH"
 
       - name: Build release APK
         working-directory: mobile
@@ -50,8 +66,10 @@ jobs:
           make_latest: false
           files: JasonBible-phone.apk
           body: |
-            Automatic build of the `phone` branch — the Android edition with
-            the full offline library (143 translations), the swipe workspace
-            and the desktop feature set.
+            Automatic build of the `phone` branch — the Android edition with the
+            swipe workspace and the desktop feature set.
+
+            KJV and the Hebrew Westminster Leningrad Codex are bundled; 88 more
+            translations download on demand from Settings → More translations.
 
             Built from ${{ github.sha }}.
