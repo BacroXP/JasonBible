@@ -30,6 +30,20 @@ object BibleRepository {
     const val INTERLINEAR_MODULE_ID = "trparsed"
 
     /**
+     * Module id of the bundled Hebrew Bible used by the verse panel
+     * (Hebrew reading + clickable words). Prefers the modern Hebrew module
+     * and falls back to any module in the `HE-` folder; empty when the
+     * installation ships no Hebrew module at all.
+     */
+    val HEBREW_MODULE_ID: String by lazy {
+        BibleCatalog.entryFor("he_modern")?.moduleId
+            ?: BibleCatalog.entries
+                .firstOrNull { it.languageFolder.startsWith("HE-") }
+                ?.moduleId
+            ?: ""
+    }
+
+    /**
      * Module id of the currently selected translation, falling back to
      * the catalog default when the saved id no longer exists. Reads
      * [SettingsManager.translation] (a Compose snapshot state), so
@@ -139,8 +153,21 @@ object BibleRepository {
         greekBooks: List<Book>?,
         bookNumber: Int,
         chapterNumber: Int
+    ): Map<Int, String> = verseTextsForChapter(greekBooks, bookNumber, chapterNumber)
+
+    /**
+     * Verse-number → text for one chapter of ANY parsed module. Shared by
+     * the Greek interlinear and the Hebrew verse panel (the two modules have
+     * identical book / chapter / verse numbering, only the language
+     * differs). Empty when the module isn't loaded or the chapter is
+     * absent.
+     */
+    fun verseTextsForChapter(
+        books: List<Book>?,
+        bookNumber: Int,
+        chapterNumber: Int
     ): Map<Int, String> {
-        val book = greekBooks?.find { it.book == bookNumber } ?: return emptyMap()
+        val book = books?.find { it.book == bookNumber } ?: return emptyMap()
         val chapter = book.chapters.find { it.chapter == chapterNumber } ?: return emptyMap()
         return chapter.verses.associate { it.verse to it.text }
     }

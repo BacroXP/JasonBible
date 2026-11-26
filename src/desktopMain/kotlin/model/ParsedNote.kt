@@ -65,5 +65,9 @@ data class NoteReference(
     val book: String,
     val chapter: Int,
     val verse: Int,
-    val label: String? = null
+    val label: String? = null,
+    /** Inclusive range end when the reference carries a range suffix. */
+    val endChapter: Int? = null,
+    /** Inclusive last verse of the range (non-null with [endChapter]). */
+    val endVerse: Int? = null
 )

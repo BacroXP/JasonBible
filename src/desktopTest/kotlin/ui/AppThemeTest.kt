@@ -1,6 +1,7 @@
 package ui
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -63,17 +64,88 @@ class AppThemeTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun everyStyleUsesThePagesPalette() {
-        val light = pagesScheme(false)
-        val dark = pagesScheme(true)
-        for (style in AppColorStyle.entries) {
-            val lightScheme = appColorScheme(false, style, 0xFF3B82F6L)
-            val darkScheme = appColorScheme(true, style, 0xFF3B82F6L)
-            assertEquals(light.primary, lightScheme.primary, "light primary for ${style.key}")
-            assertEquals(light.background, lightScheme.background)
-            assertEquals(dark.primary, darkScheme.primary, "dark primary for ${style.key}")
-            assertEquals(dark.background, darkScheme.background)
+    fun normalStyleIsExactlyThePagesPalette() {
+        for (dark in listOf(true, false)) {
+            val pages = pagesScheme(dark)
+            val normal = appColorScheme(dark, AppColorStyle.NORMAL, 0xFF3B82F6L)
+            assertEquals(pages.primary, normal.primary)
+            assertEquals(pages.background, normal.background)
+            assertEquals(pages.surface, normal.surface)
+            assertEquals(pages.onSurface, normal.onSurface)
         }
+    }
+
+    @Test
+    fun everyStyleKeepsThePagesDarknessAndContrast() {
+        for (style in AppColorStyle.entries) {
+            val dark = appColorScheme(true, style, 0xFF3B82F6L)
+            val light = appColorScheme(false, style, 0xFF3B82F6L)
+            assertTrue(
+                dark.background.luminance() < 0.2f,
+                "dark background for ${style.key}"
+            )
+            assertTrue(
+                light.background.luminance() > 0.7f,
+                "light background for ${style.key}"
+            )
+            // Body text must stay clearly readable on its panel.
+            assertTrue(
+                dark.onSurface.luminance() > dark.surface.luminance() + 0.5f,
+                "dark text contrast for ${style.key}"
+            )
+            assertTrue(
+                light.onSurface.luminance() < light.surface.luminance() - 0.5f,
+                "light text contrast for ${style.key}"
+            )
+        }
+    }
+
+    @Test
+    fun saturatedStyleRaisesChroma() {
+        val normal = appColorScheme(true, AppColorStyle.NORMAL, 0L)
+        val saturated = appColorScheme(true, AppColorStyle.SATURATED, 0L)
+        assertTrue(saturationOf(saturated.primary) > saturationOf(normal.primary))
+        assertTrue(saturationOf(saturated.surface) > saturationOf(normal.surface))
+        assertTrue(saturated.primary != normal.primary)
+        assertTrue(saturated.surface != normal.surface)
+    }
+
+    @Test
+    fun grayStyleIsMonochrome() {
+        for (dark in listOf(true, false)) {
+            val gray = appColorScheme(dark, AppColorStyle.GRAY, 0xFF3B82F6L)
+            for (role in listOf(
+                gray.primary,
+                gray.secondary,
+                gray.background,
+                gray.surface,
+                gray.surfaceContainerHigh,
+                gray.outline,
+                gray.error
+            )) {
+                assertEquals(0f, saturationOf(role), 0.01f, "role in ${if (dark) "dark" else "light"}")
+            }
+        }
+    }
+
+    @Test
+    fun customStyleTakesTheSeedHue() {
+        val blueSeed = 0xFF3B82F6L
+        val greenSeed = 0xFF22C55EL
+        val blue = appColorScheme(true, AppColorStyle.CUSTOM, blueSeed)
+        val green = appColorScheme(true, AppColorStyle.CUSTOM, greenSeed)
+        assertEquals(hueOf(Color(blueSeed)), hueOf(blue.primary), 0.02f)
+        assertEquals(hueOf(Color(greenSeed)), hueOf(green.primary), 0.02f)
+        assertTrue(blue.primary != green.primary)
+        // Panels pick up the seed but stay navy-dark.
+        assertTrue(blue.surface.luminance() < 0.2f)
+    }
+
+    @Test
+    fun customStyleWithNeutralSeedKeepsTheGoldAccent() {
+        val normal = appColorScheme(true, AppColorStyle.NORMAL, 0L)
+        val graySeed = appColorScheme(true, AppColorStyle.CUSTOM, 0xFF808080L)
+        assertEquals(normal.primary, graySeed.primary)
     }
 
     @Test
@@ -82,23 +154,6 @@ class AppThemeTest {
         val dark = pagesScheme(true)
         assertTrue(light.background != dark.background, "light/dark backgrounds must differ")
         assertTrue(light.primary != dark.primary, "light/dark primaries must differ")
-    }
-
-    @Test
-    fun styleSelectionDoesNotAlterThePagesPalette() {
-        val normal = appColorScheme(false, AppColorStyle.NORMAL, 0xFF3B82F6L)
-        for (style in AppColorStyle.entries) {
-            val scheme = appColorScheme(false, style, 0xFF3B82F6L)
-            assertEquals(normal.primary, scheme.primary)
-            assertEquals(normal.surface, scheme.surface)
-        }
-    }
-
-    @Test
-    fun customAccentIsIgnoredByThePagesPalette() {
-        val blue = appColorScheme(false, AppColorStyle.CUSTOM, 0xFF3B82F6L)
-        val green = appColorScheme(false, AppColorStyle.CUSTOM, 0xFF22C55E)
-        assertEquals(blue.primary, green.primary)
     }
 
     @Test
@@ -113,3 +168,8 @@ class AppThemeTest {
         assertEquals(1f, scheme.primary.alpha, 0.001f)
     }
 }
+
+
+internal fun saturationOf(color: Color): Float = color.toHsl().second
+
+internal fun hueOf(color: Color): Float = color.toHsl().first

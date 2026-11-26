@@ -55,6 +55,11 @@ private data class PrivateSettings(
     // sample whenever the notes folder happens to be empty (e.g. after
     // the user deletes every note) — seeding happens exactly once.
     val notesInitialized: Boolean = false,
+    // Absolute folder the notes library lives in ("" = the default
+    // ~/.bibleapp/notes). Written by NotesRepository.migrateTo, which also
+    // MOVES the existing notes there, so the setting and the files never
+    // disagree.
+    val notesFolder: String = "",
     // Last Bible full-text search session, persisted so reopening the
     // search bar (Ctrl+F) resumes exactly where the user left off:
     // the query text and the two matching toggles (Aa / whole word).
@@ -213,6 +218,7 @@ object SettingsManager {
     private val editorMaxWidthState = mutableStateOf(980.dp)
     private val editorFontScaleState = mutableStateOf(1f)
     private val notesInitializedState = mutableStateOf(false)
+    private val notesFolderState = mutableStateOf("")
     private val bibleSearchQueryState = mutableStateOf("")
     private val bibleSearchMatchCaseState = mutableStateOf(false)
     private val bibleSearchWholeWordState = mutableStateOf(false)
@@ -395,6 +401,21 @@ object SettingsManager {
         set(value) {
             if (notesInitializedState.value != value) {
                 notesInitializedState.value = value
+                save()
+            }
+        }
+
+    /**
+     * Absolute folder the notes live in ("" = the default
+     * `~/.bibleapp/notes`). Change it through
+     * [data.NotesRepository.migrateTo], which moves the files along;
+     * setting it alone would point the app at an empty folder.
+     */
+    var notesFolder: String
+        get() = notesFolderState.value
+        set(value) {
+            if (notesFolderState.value != value) {
+                notesFolderState.value = value
                 save()
             }
         }
@@ -712,6 +733,18 @@ object SettingsManager {
 
 
     /**
+     * How many chapters of [bookNumber] are marked read. The book index
+     * shows this per row, so progress through a book is visible without
+     * opening it. Reads the same observable set as [isChapterRead], so the
+     * index refreshes as soon as a chapter is toggled read.
+     */
+    fun readChapterCount(bookNumber: Int): Int {
+        val prefix = "$bookNumber:"
+        return readChaptersState.value.count { it.startsWith(prefix) }
+    }
+
+
+    /**
      * Every chapter-read event with its date, sorted chronologically.
      * Feeds the reading-statistics activity charts; the totals continue
      * to come from [readChapterCount] so pre-history chapters still
@@ -812,6 +845,7 @@ object SettingsManager {
         editorFontScaleState.value = settings.editorFontScale
             .coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
         notesInitializedState.value = settings.notesInitialized
+        notesFolderState.value = settings.notesFolder
         bibleSearchQueryState.value = settings.bibleSearchQuery
         bibleSearchMatchCaseState.value = settings.bibleSearchMatchCase
         bibleSearchWholeWordState.value = settings.bibleSearchWholeWord
@@ -876,6 +910,7 @@ object SettingsManager {
                         editorMaxWidth = editorMaxWidthState.value.value,
                         editorFontScale = editorFontScaleState.value,
                         notesInitialized = notesInitializedState.value,
+                        notesFolder = notesFolderState.value,
                         bibleSearchQuery = bibleSearchQueryState.value,
                         bibleSearchMatchCase = bibleSearchMatchCaseState.value,
                         bibleSearchWholeWord = bibleSearchWholeWordState.value,

@@ -6,6 +6,7 @@
 
 package ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -41,9 +44,11 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.SpanStyle
@@ -53,8 +58,10 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draganddrop.DragAndDropTransferAction
@@ -74,25 +81,41 @@ import kotlin.time.Duration.Companion.milliseconds
 
 
 
-private enum class MarkerColor(
-    val hex: String, val color: Color
-) {
-    Yellow("#FFF59D", Color(0xFFFFF176)),
-    Green("#A5D6A7", Color(0xFF81C784)),
-    Blue("#90CAF9", Color(0xFF64B5F6)),
-    Purple("#CE93D8", Color(0xFFBA68C8)),
-    Red("#EF9A9A", Color(0xFFE57373))
-}
+/**
+ * One book in a testament's list: a single full-width row with the gold `01`
+ * gutter number, the serif book name and its chapter count, so the books
+ * read as one numbered column instead of a tile grid. Drag it into a note
+ * to insert a `$Book` reference.
+ */
 @Composable
 internal fun BookCard(
     book: Book,
+    index: Int,
     starred: Boolean,
+    readChapters: Int = 0,
     onOpen: () -> Unit,
     onToggleStar: () -> Unit
 ) {
-    Card(
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = if (hovered) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        } else {
+            Color.Transparent
+        },
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (hovered) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            } else {
+                Color.Transparent
+            }
+        ),
         modifier = Modifier
             .fillMaxWidth()
+            .hoverable(hover)
             .dragAndDropSource {
                 DragAndDropTransferData(
                     transferable = DragAndDropTransferable(
@@ -103,83 +126,45 @@ internal fun BookCard(
             }
             .clickable { onOpen() }
     ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(14.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = book.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
-
-                StarGlyph(
-                    starred = starred,
-                    onClick = onToggleStar
-                )
-            }
-
-            Text(
-                text = "${book.chapters.size} chapters",
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-    }
-}
-
-
-@Composable
-internal fun ChapterCard(
-    book: Book,
-    chapterNumber: Int,
-    starred: Boolean,
-    onOpen: () -> Unit,
-    onToggleStar: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 100.dp)
-            .dragAndDropSource {
-                DragAndDropTransferData(
-                    transferable = DragAndDropTransferable(
-                        StringSelection(chapterTag(book.name, chapterNumber))
-                    ),
-                    supportedActions = listOf(DragAndDropTransferAction.Copy)
-                )
-            }
-            .clickable { onOpen() }
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(14.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "Ch. $chapterNumber",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
-
-                StarGlyph(
-                    starred = starred,
-                    onClick = onToggleStar
-                )
-            }
-
+            SectionNumber("%02d".format(index))
             Text(
                 text = book.name,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 14.dp)
             )
+            // Once a chapter is marked read the chapter count becomes the
+            // read progress ("✓ 3 / 50 read") in gold; untouched books keep
+            // the muted chapter count, so read progress stands out in the
+            // index at a glance.
+            val total = book.chapters.size
+            val read = readChapters.coerceIn(0, total)
+            Text(
+                text = if (read > 0) {
+                    "\u2713 $read / $total read"
+                } else {
+                    "$total chapters"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (read > 0) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+            Box(modifier = Modifier.padding(start = 12.dp)) {
+                StarGlyph(
+                    starred = starred,
+                    onClick = onToggleStar
+                )
+            }
         }
     }
 }
@@ -272,11 +257,15 @@ internal fun VerseRow(
     chapterNumber: Int,
     verseNumber: Int,
     text: String,
-    selected: Boolean,
     hoverHighlighted: Boolean = false,
+    /** Opens this verse's reference card (mentions / similar texts /
+     *  Hebrew) in the chapter reader. */
+    onClick: () -> Unit = {},
+    /** Right-click: export this single verse as a card / slide. */
+    onExportVerse: (Int) -> Unit = {},
+    /** Right-click: export a range that starts at this verse. */
+    onExportRange: (Int) -> Unit = {},
     onOpenNoteTitle: (String, BibleReferenceSelection?) -> Unit,
-    onClick: () -> Unit,
-    onToggleMarker: (String?) -> Unit,
     onVersePositioned: (Int, Int) -> Unit = { _, _ -> },
     // Word study: when the active translation carries Strong's markup the
     // verse renders clickable word tokens; these carry which token's panel
@@ -307,6 +296,14 @@ internal fun VerseRow(
     var hovered by remember(bookNumber, chapterNumber, verseNumber) {
         mutableStateOf(false)
     }
+    // Right-click context menu: anchor offset in the verse card, non-null
+    // while the export / copy menu is open.
+    var contextOffset by remember(bookNumber, chapterNumber, verseNumber) {
+        mutableStateOf<DpOffset?>(null)
+    }
+    val density = LocalDensity.current
+    val clipboard = LocalClipboard.current
+    val clipboardScope = rememberCoroutineScope()
 
     val noteTitles = NotesRepository.titlesForVerse(
         bookName,
@@ -348,9 +345,8 @@ internal fun VerseRow(
     }
 
     val highlightColor = when {
-        markerPreview != null && (selected || hoverHighlighted) -> colorFromHexInternal(markerPreview).copy(alpha = 0.32f)
+        markerPreview != null && hoverHighlighted -> colorFromHexInternal(markerPreview).copy(alpha = 0.32f)
         markerPreview != null -> colorFromHexInternal(markerPreview).copy(alpha = 0.18f)
-        selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
         hoverHighlighted -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
         hovered -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
         else -> Color.Transparent
@@ -397,7 +393,18 @@ internal fun VerseRow(
                 }
                 .onPointerEvent(PointerEventType.Enter) { hovered = true }
                 .onPointerEvent(PointerEventType.Exit) { hovered = false }
-                .clickable { onClick() }
+                .onPointerEvent(PointerEventType.Press) { event ->
+                    if (event.buttons.isSecondaryPressed) {
+                        val position = event.changes.firstOrNull()?.position
+                        if (position != null) {
+                            SoundManager.play(SoundEvent.Click)
+                            contextOffset = with(density) {
+                                DpOffset(position.x.toDp(), position.y.toDp())
+                            }
+                        }
+                    }
+                }
+                .clickable(onClick = onClick)
         ) {
             Box {
                 Row(
@@ -450,10 +457,9 @@ internal fun VerseRow(
 
                         // Interlinear: the Greek TR verse beneath the English
                         // text, rendered by the shared [VerseInterlinear] so
-                        // the chapter view and the whole-book continuous
-                        // reading view always show the same LINE / word-
-                        // aligned output. Clickable Strong's numbers feed the
-                        // same word-study panel as the English side.
+                        // every verse row shows the same LINE / word-aligned
+                        // output. Clickable Strong's numbers feed the same
+                        // word-study panel as the English side.
                         interlinearGreek?.let { greekText ->
                             VerseInterlinear(
                                 englishText = text,
@@ -503,17 +509,54 @@ internal fun VerseRow(
             }
         }
 
-        if (selected) {
-            VerseMarkerPanel(
-                bookName = bookName,
-                bookNumber = bookNumber,
-                chapterNumber = chapterNumber,
-                verseNumber = verseNumber,
-                currentColorHex = markerPreview,
-                copyText = copyText,
-                onOpenNoteTitle = onOpenNoteTitle,
-                onPickColor = onToggleMarker
-            )
+        // Right-click menu: export this verse (or a range starting here)
+        // as a stylish postcard / PowerPoint, or copy the text and
+        // reference. Anchored at the press point.
+        contextOffset?.let { offset ->
+            DropdownMenu(
+                expanded = true,
+                offset = offset,
+                onDismissRequest = { contextOffset = null }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Export this verse…") },
+                    onClick = {
+                        SoundManager.play(SoundEvent.Click)
+                        contextOffset = null
+                        onExportVerse(verseNumber)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Export a range from here…") },
+                    onClick = {
+                        SoundManager.play(SoundEvent.Click)
+                        contextOffset = null
+                        onExportRange(verseNumber)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Copy verse") },
+                    onClick = {
+                        SoundManager.play(SoundEvent.Click)
+                        clipboardScope.launch {
+                            clipboard.setClipEntry(plainTextClipEntry(copyText))
+                        }
+                        contextOffset = null
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Copy reference") },
+                    onClick = {
+                        SoundManager.play(SoundEvent.Click)
+                        clipboardScope.launch {
+                            clipboard.setClipEntry(
+                                plainTextClipEntry("$bookName $chapterNumber:$verseNumber")
+                            )
+                        }
+                        contextOffset = null
+                    }
+                )
+            }
         }
 
         if (activeForThisVerse != null) {
@@ -529,195 +572,7 @@ internal fun VerseRow(
 
 
 @Composable
-private fun VerseMarkerPanel(
-    bookName: String,
-    bookNumber: Int,
-    chapterNumber: Int,
-    verseNumber: Int,
-    currentColorHex: String?,
-    copyText: String,
-    onOpenNoteTitle: (String, BibleReferenceSelection?) -> Unit,
-    onPickColor: (String?) -> Unit
-) {
-    val references = NotesRepository.referencesForVerse(bookName, chapterNumber, verseNumber)
-
-    // Custom-color picker: opened from the rainbow dot, seeded with the
-    // verse's current marker color (or a fresh yellow). The hex field
-    // beneath the dots applies a typed color immediately.
-    var pickerOpen by remember { mutableStateOf(false) }
-    var hexText by remember(bookNumber, chapterNumber, verseNumber, currentColorHex) {
-        mutableStateOf(currentColorHex?.uppercase() ?: "#FFD54F")
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(14.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "Referenced notes",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                CopyPill(copyText = copyText)
-            }
-
-            if (references.isEmpty()) {
-                Text(
-                    text = "No notes reference this verse.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            } else {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    references.forEach { ref ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            NoteChip(
-                                text = ref.noteTitle,
-                                onClick = {
-                                    onOpenNoteTitle(
-                                        ref.noteTitle,
-                                        BibleReferenceSelection(
-                                            book = bookName,
-                                            chapter = chapterNumber,
-                                            verse = verseNumber
-                                        )
-                                    )
-                                }
-                            )
-                            ref.label?.let {
-                                Text(text = it)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MarkerColor.entries.forEach { marker ->
-                    ColorDot(
-                        color = marker.color,
-                        onClick = {
-                            SoundManager.play(SoundEvent.Click)
-                            onPickColor(marker.hex)
-                        }
-                    )
-                }
-
-                ColorDot(
-                    color = MaterialTheme.colorScheme.outline,
-                    label = "×",
-                    onClick = {
-                        SoundManager.play(SoundEvent.Click)
-                        onPickColor(null)
-                    }
-                )
-
-                // Custom color: rainbow dot opens the picker dialog;
-                // when the verse uses a non-preset color, the dot shows it.
-                val custom = currentColorHex?.takeIf { hex ->
-                    MarkerColor.entries.none { it.hex.equals(hex, ignoreCase = true) }
-                }
-                Box(contentAlignment = Alignment.Center) {
-                    if (custom != null) {
-                        ColorDot(
-                            color = colorFromHexInternal(custom),
-                            onClick = { pickerOpen = true }
-                        )
-                    } else {
-                        RainbowDot(
-                            modifier = Modifier.size(28.dp),
-                            onClick = { pickerOpen = true }
-                        )
-                    }
-                }
-            }
-
-            // Hex color field: type a #RRGGBB value to apply it directly
-            // (Enter commits; the field border turns red while invalid).
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                HexColorField(
-                    value = hexText,
-                    onValueChange = { raw ->
-                        hexText = sanitizeHexInput(raw)
-                        if (isValidMarkerHex(hexText)) {
-                            SoundManager.play(SoundEvent.Click)
-                            onPickColor(hexText)
-                        }
-                    },
-                    onCommit = {
-                        if (isValidMarkerHex(hexText)) {
-                            SoundManager.play(SoundEvent.Click)
-                            onPickColor(hexText)
-                        }
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = "Custom",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-
-    if (pickerOpen) {
-        ColorPickerDialog(
-            initialHex = currentColorHex,
-            onDismiss = { pickerOpen = false },
-            onPick = { hex ->
-                SoundManager.play(SoundEvent.Click)
-                onPickColor(hex)
-                pickerOpen = false
-            }
-        )
-    }
-}
-
-
-@Composable
-private fun ColorDot(
-    color: Color,
-    label: String? = null,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(28.dp)
-            .hoverable(remember { MutableInteractionSource() })
-            .background(color.copy(alpha = 0.8f), CircleShape)
-            .clickable {
-                SoundManager.play(SoundEvent.Click)
-                onClick()
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        if (label != null) {
-            Text(
-                text = label,
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmall
-            )
-        }
-    }
-}
-
-
-@Composable
-private fun NoteChip(
+internal fun NoteChip(
     text: String,
     onClick: () -> Unit
 ) {
@@ -780,7 +635,7 @@ private fun StarGlyph(
  * "include translation name" setting is on, the active translation's
  * display name is appended, e.g. `John 3:16 — … (Luther Bible 1912)`.
  */
-private fun verseCopyText(bookName: String, chapter: Int, verse: Int, text: String): String =
+internal fun verseCopyText(bookName: String, chapter: Int, verse: Int, text: String): String =
     "${bookName.trim()} $chapter:$verse — ${text.trim()}${copyTranslationSuffix()}"
 
 
@@ -913,16 +768,6 @@ private fun verseTag(
     verseNumber: Int
 ): String {
     return "$" + bookName + "$" + chapterNumber + "$" + verseNumber
-}
-
-
-internal fun responsiveColumns(
-    maxWidth: Dp,
-    minCardWidth: Dp
-): Int {
-    return (maxWidth / minCardWidth)
-        .toInt()
-        .coerceIn(1, 6)
 }
 
 
@@ -1072,8 +917,8 @@ private fun AlignedInterlinear(
  * Greek TR line in LINE mode, or word-aligned columns in ALIGNED mode —
  * falling back to the plain line when either side carries no Strong's
  * tokens to join (e.g. a translation without Strong's markup). Shared by
- * the chapter view (VerseRow) and the whole-book continuous reading view
- * so the two modes always look and behave identically.
+ * the chapter verse rows so LINE and word-aligned output always look and
+ * behave identically.
  */
 @Composable
 internal fun VerseInterlinear(

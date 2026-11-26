@@ -671,7 +671,7 @@ private fun BibleSearchMatchRow(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(
                 containerColor = when {
-                    active -> MaterialTheme.colorScheme.primaryContainer
+                    active -> activeChromeFill()
                     isHovered -> MaterialTheme.colorScheme.surfaceVariant
                     else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 }

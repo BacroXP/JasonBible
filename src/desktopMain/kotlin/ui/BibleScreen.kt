@@ -5,45 +5,45 @@
 
 package ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.VerticalScrollbar
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,12 +53,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,13 +71,12 @@ import data.SettingsManager
 import data.SoundEvent
 import data.SoundManager
 import data.StrongsRepository
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import model.Book
 import model.Verse
 import ui.components.MaxWidthScaffold
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlin.time.Duration.Companion.milliseconds
-
 
 
 private enum class Testament {
@@ -125,8 +127,6 @@ fun BibleScreen(
      *  verse). Wired by Navigation; defaults to a no-op. */
     onOpenCompare: (String, Int, Int) -> Unit = { _, _, _ -> }
 ) {
-    val bookGridState = rememberLazyGridState()
-    val chapterGridState = rememberLazyGridState()
     val verseScrollState = rememberScrollState()
 
     val scope = rememberCoroutineScope()
@@ -136,25 +136,28 @@ fun BibleScreen(
     ) { mutableMapOf() }
 
     var testament by remember { mutableStateOf(Testament.OLD) }
+    // Drill-down level 0: until a testament is picked the pane shows "The
+    // Bible" with the two numbered testaments instead of the book grid.
+    var testamentChosen by remember { mutableStateOf(false) }
     var selectedBookNumber by remember { mutableStateOf<Int?>(null) }
     var selectedChapterNumber by remember { mutableStateOf<Int?>(null) }
     var selectedVerseNumber by remember { mutableStateOf<Int?>(null) }
-    // "＋ Collection" dialog for the selected verse (opened via the header
-    // pill; only reachable while a verse is selected).
-    var addToCollectionOpen by remember { mutableStateOf(false) }
-    // Copy-range dialog for the chapter view's "More ▾" menu; non-null
-    // while the dialog is open.
-    var copyRangeOpen by remember { mutableStateOf(false) }
+    // Verse reference card: clicking a verse opens its mentions / similar
+    // texts / Hebrew analysis right under it. Only one chapter is ever on
+    // screen, so the card belongs to the chapter view alone.
+    var selectedVerseDetail by remember { mutableStateOf<Int?>(null) }
+    // Parsed Hebrew module for that card, loaded on the first verse click.
+    var hebrewBooks by remember { mutableStateOf<List<Book>?>(null) }
+    // Reference the pane was last navigated to from a note chip / search
+    // result. Kept highlighted so an arriving verse RANGE stays visible as
+    // a range (the transient hover highlight only lives while the pointer
+    // sits on the editor chip).
+    var activeReference by remember { mutableStateOf<BibleReferenceSelection?>(null) }
+    // Pending right-click export: the verses and range preselected in the
+    // export dialog, or null while it is closed.
+    var exportSeed by remember { mutableStateOf<VerseExportSeed?>(null) }
     // Ctrl+G jump-to-verse dialog.
     var jumpDialogOpen by remember { mutableStateOf(false) }
-    // Cross-reference panel toggle: when on, the selected verse's derived
-    // cross references (parallels / OT quotations / thematic links) render
-    // below the chapter jump strip.
-    var crossRefsOpen by remember { mutableStateOf(false) }
-    // Whole-book continuous reading: renders every chapter of the open
-    // book as one scrolling passage (chapter boundaries become headings).
-    // Exited whenever the pane navigates to a specific chapter / verse.
-    var continuousMode by remember { mutableStateOf(false) }
     // Interlinear view: OFF / LINE (the matching Greek TR verse beneath
     // each NT verse) / ALIGNED (Greek tokens paired word-by-word with the
     // English via Strong's numbers). The Greek module is loaded lazily
@@ -162,14 +165,6 @@ fun BibleScreen(
     var interlinearMode by remember { mutableStateOf(InterlinearMode.OFF) }
     var greekBooks by remember { mutableStateOf<List<Book>?>(null) }
 
-    // Back/forward navigation history for the reading pane. Each entry
-    // is a (book number, chapter, verse) target — book numbers are
-    // canonical across translations, so history survives translation
-    // switches. The stack is pushed on user navigation (book / chapter /
-    // verse clicks, search-result jumps, Ctrl+G); back/forward step the
-    // index without pushing.
-    val historyStack = remember { mutableStateListOf<NavPoint>() }
-    var historyIndex by remember { mutableStateOf(-1) }
 
     // Scroll-to-verse plumbing for tag-driven navigation.
     //
@@ -186,7 +181,7 @@ fun BibleScreen(
     // flag. Same-chapter navigation also works: the verses are already
     // laid out so the offset is in the map and the scroll fires
     // immediately.
-    val verseYOffsetsMap = remember { mutableMapOf<Int, Int>() }
+    val verseYOffsetsMap = remember { mutableMapOf<String, Int>() }
     var verseYOffsetsVersion by remember { mutableStateOf(0) }
     var pendingScrollVerse by remember { mutableStateOf<Int?>(null) }
 
@@ -228,6 +223,24 @@ fun BibleScreen(
         emptyList()
     }
     val booksLoading = loadedModuleId != currentModuleId || loadedBooks == null
+
+    // Root index page: one scrolling column holding both testament sections.
+    // The top bar and the numbered rail jump between them, exactly like the
+    // Settings screen's section list.
+    val rootScroll = rememberScrollState()
+    val rootSectionOffsets = remember { mutableStateMapOf<String, Int>() }
+    val testamentSections = remember {
+        listOf(
+            BibleNavSection("ot", "01", "Old Testament"),
+            BibleNavSection("nt", "02", "New Testament")
+        )
+    }
+    val rootActiveSectionId = testamentSections
+        .lastOrNull { section ->
+            (rootSectionOffsets[section.id] ?: Int.MAX_VALUE) <= rootScroll.value + 48
+        }
+        ?.id
+        ?: testamentSections.first().id
 
     // Word-aligned interlinear joins the Greek numbers against Strong's-
     // marked English text (`word{G####}` tokens), so it only makes sense
@@ -285,6 +298,14 @@ fun BibleScreen(
         }
     }
 
+    // The Hebrew section of the verse card needs the bundled Hebrew module;
+    // parse it (off the UI thread, cached afterwards) on the first click.
+    androidx.compose.runtime.LaunchedEffect(selectedVerseDetail) {
+        if (selectedVerseDetail != null && hebrewBooks == null) {
+            hebrewBooks = BibleRepository.loadModule(BibleRepository.HEBREW_MODULE_ID)
+        }
+    }
+
     // If the user switches to a translation without Strong's markup while
     // in word-aligned mode, drop back to the plain Greek line — there is
     // nothing to align against. Guarded by `books.isNotEmpty()` so the
@@ -301,81 +322,17 @@ fun BibleScreen(
         }
     }
 
-    /**
-     * Jump the pane to a search match: select its book / chapter / verse,
-     * queue a scroll-to-verse (pendingScrollVerse fires as soon as the
-     * verse's Y offset is reported — immediately when it is already on
-     * screen, otherwise after the new chapter lays out) and close the
-     * search so the verse is actually visible.
-     */
-    /**
-     * Push a navigation target onto the history stack, truncating any
-     * forward tail (the user navigated back, then somewhere new).
-     * Consecutive duplicates are collapsed so toggling a verse selection
-     * doesn't spam the stack.
-     */
-    fun recordNavigation(bn: Int, cn: Int?, vn: Int?) {
-        if (historyIndex < historyStack.lastIndex) {
-            historyStack.removeRange(historyIndex + 1, historyStack.size)
-        }
-        val last = historyStack.lastOrNull()
-        if (last != null &&
-            last.bookNumber == bn && last.chapter == cn && last.verse == vn
-        ) {
-            return
-        }
-        historyStack.add(NavPoint(bn, cn, vn))
-        historyIndex = historyStack.lastIndex
-    }
 
-    /**
-     * Restore a history entry: select its book / chapter / verse without
-     * pushing (Back / Forward step the index instead). Verse targets also
-     * queue a scroll-to-verse so the restored verse is actually on screen.
-     * Returns false (without changing the view) when the target book
-     * doesn't exist in the currently loaded module — the caller then
-     * leaves the history index untouched so it can't drift out of sync
-     * with what's on screen.
-     */
-    fun applyHistoryPoint(point: NavPoint): Boolean {
-        if (books.none { it.book == point.bookNumber }) return false
-        continuousMode = false
-        testament = if (point.bookNumber <= 39) {
-            Testament.OLD
-        } else {
-            Testament.NEW
-        }
-        selectedBookNumber = point.bookNumber
-        selectedChapterNumber = point.chapter
-        selectedVerseNumber = point.verse
-        if (point.verse != null) pendingScrollVerse = point.verse
-        return true
-    }
 
-    fun goHistoryBack() {
-        if (historyIndex > 0) {
-            val candidate = historyIndex - 1
-            if (applyHistoryPoint(historyStack[candidate])) {
-                historyIndex = candidate
-            }
-        }
-    }
 
-    fun goHistoryForward() {
-        if (historyIndex < historyStack.lastIndex) {
-            val candidate = historyIndex + 1
-            if (applyHistoryPoint(historyStack[candidate])) {
-                historyIndex = candidate
-            }
-        }
-    }
 
     /**
      * Jump (from Ctrl+G / the jump dialog) to a book / chapter / verse,
      * recording the move in history like any other navigation.
      */
     fun jumpToVerse(bookNumber: Int, chapterNumber: Int, verseNumber: Int?) {
-        continuousMode = false
+        // A manual jump replaces the reference the pane arrived on.
+        activeReference = null
         testament = if (bookNumber <= 39) {
             Testament.OLD
         } else {
@@ -384,13 +341,12 @@ fun BibleScreen(
         selectedBookNumber = bookNumber
         selectedChapterNumber = chapterNumber
         selectedVerseNumber = verseNumber
-        recordNavigation(bookNumber, chapterNumber, verseNumber)
         if (verseNumber != null) pendingScrollVerse = verseNumber
     }
 
     fun openSearchResult(match: BibleSearchMatch) {
         SoundManager.play(SoundEvent.Click)
-        continuousMode = false
+        activeReference = null
         selectedBookNumber = match.book.book
         testament = if (match.book.book <= 39) {
             Testament.OLD
@@ -400,8 +356,41 @@ fun BibleScreen(
         selectedChapterNumber = match.chapter
         selectedVerseNumber = match.verse
         pendingScrollVerse = match.verse
-        recordNavigation(match.book.book, match.chapter, match.verse)
         search.close()
+    }
+
+    /**
+     * Open a book straight into a single chapter: the one the reader last
+     * left in that book, otherwise its first chapter. The whole-book scroll
+     * is gone, so a book click never lands on a "read straight through"
+     * listing anymore.
+     */
+    fun openBook(book: Book) {
+        SoundManager.play(SoundEvent.Click)
+        activeReference = null
+        testament = if (book.book <= 39) {
+            Testament.OLD
+        } else {
+            Testament.NEW
+        }
+        selectedBookNumber = book.book
+        selectedVerseDetail = null
+        val last = SettingsManager.getLastRead()
+            ?.takeIf { saved -> saved.bookNumber == book.book }
+        val chapter = last?.chapterNumber?.coerceIn(
+            1,
+            book.chapters.size.coerceAtLeast(1)
+        ) ?: book.chapters.firstOrNull()?.chapter
+        selectedChapterNumber = chapter
+        selectedVerseNumber = last?.verseNumber
+        // Resume at the exact verse, but only when it really exists in the
+        // chapter we are opening (a stale setting must not leave the pane
+        // waiting for a verse that never renders).
+        pendingScrollVerse = last?.verseNumber?.takeIf { verse ->
+            chapter != null &&
+                book.chapters.find { it.chapter == chapter }
+                    ?.verses?.any { it.verse == verse } == true
+        }
     }
 
     androidx.compose.runtime.LaunchedEffect(initialReference) {
@@ -424,10 +413,12 @@ fun BibleScreen(
             } else {
                 Testament.NEW
             }
-            continuousMode = false
             selectedChapterNumber = incoming.chapter
             selectedVerseNumber = incoming.verse
-            recordNavigation(matchingBook.book, incoming.chapter, incoming.verse)
+            // Keep the whole incoming reference (including its range) so
+            // every verse it covers is highlighted on arrival, not just
+            // the first one.
+            activeReference = incoming
             // Only queue a scroll-to-verse if the requested verse actually
             // exists in the destination chapter. Without this guard, a
             // bogus reference like `$Genesis$1$999` would set
@@ -441,19 +432,46 @@ fun BibleScreen(
             }
         } else {
             // Nothing requested explicitly — resume the user's last-read
-            // book/chapter from SettingsManager if it still maps to a real book.
+            // book/chapter from SettingsManager if it still maps to a real
+            // book, and fall back to the start of the Bible on a fresh
+            // install so "Bible" always lands on a chapter, never the index.
             val last = SettingsManager.getLastRead()
-            if (last != null && loaded.any { it.book == last.bookNumber }) {
-                continuousMode = false
+            val lastBook = last?.let { saved ->
+                loaded.find { it.book == saved.bookNumber }
+            }
+            if (last != null && lastBook != null) {
+                // Clamp: the same book number can have a different chapter
+                // count in another translation, and a missing chapter would
+                // render an empty chapter screen.
+                val chapter = last.chapterNumber.coerceIn(
+                    1,
+                    lastBook.chapters.size.coerceAtLeast(1)
+                )
                 selectedBookNumber = last.bookNumber
-                selectedChapterNumber = last.chapterNumber
+                selectedChapterNumber = chapter
                 selectedVerseNumber = last.verseNumber
                 testament = if (last.bookNumber <= 39) {
                     Testament.OLD
                 } else {
                     Testament.NEW
                 }
-                recordNavigation(last.bookNumber, last.chapterNumber, last.verseNumber)
+                // Land on the verse that was being read rather than the top
+                // of the chapter. Only arm the scroll when that verse really
+                // exists in the restored chapter, so a stale setting can't
+                // leave the pane waiting for a verse that never renders.
+                pendingScrollVerse = last.verseNumber?.takeIf { verse ->
+                    lastBook.chapters
+                        .find { it.chapter == chapter }
+                        ?.verses
+                        ?.any { it.verse == verse } == true
+                }
+            } else {
+                loaded.firstOrNull()?.let { firstBook ->
+                    selectedBookNumber = firstBook.book
+                    selectedChapterNumber = firstBook.chapters.firstOrNull()?.chapter
+                    selectedVerseNumber = null
+                    testament = Testament.OLD
+                }
             }
         }
     }
@@ -461,9 +479,11 @@ fun BibleScreen(
     // Persist the active book/chapter and restore its scroll position
     // whenever the active chapter changes.
     androidx.compose.runtime.LaunchedEffect(selectedBookNumber, selectedChapterNumber) {
-        // A word-study panel belongs to the verse that was on screen; drop
-        // it when the chapter changes so a stale panel can't pop back.
+        // A word-study panel (and the verse reference card) belongs to the
+        // verse that was on screen; drop both when the chapter changes so a
+        // stale panel can't pop back.
         activeStudyWord = null
+        selectedVerseDetail = null
         val bn = selectedBookNumber
         val cn = selectedChapterNumber
         if (bn != null && cn != null) {
@@ -498,8 +518,10 @@ fun BibleScreen(
     // mounted verse list yet.
     androidx.compose.runtime.LaunchedEffect(pendingScrollVerse, verseYOffsetsVersion) {
         val target = pendingScrollVerse
-        if (target != null) {
-            val offset = verseYOffsetsMap[target]
+        val bn = selectedBookNumber
+        val cn = selectedChapterNumber
+        if (target != null && bn != null && cn != null) {
+            val offset = verseYOffsetsMap["$bn:$cn:$target"]
             if (offset != null) {
                 delay(50.milliseconds)
                 verseScrollState.animateScrollTo(offset)
@@ -509,12 +531,43 @@ fun BibleScreen(
     }
 
     // Track the live verse-scroll position for the active chapter so re-
-    // entering it via the jump strip resumes at the same place.
-    androidx.compose.runtime.LaunchedEffect(verseScrollState.value) {
+    // entering it via the jump strip resumes at the same place, and keep
+    // the verse at the top of the viewport as the one the pane resumes on.
+    androidx.compose.runtime.LaunchedEffect(verseScrollState.value, verseYOffsetsVersion) {
         val bn = selectedBookNumber
         val cn = selectedChapterNumber
         if (bn != null && cn != null) {
-            scrollOffsets["$bn:$cn"] = verseScrollState.value
+            val top = verseScrollState.value
+            scrollOffsets["$bn:$cn"] = top
+            val prefix = "$bn:$cn:"
+            verseYOffsetsMap.entries
+                .filter { entry ->
+                    entry.key.startsWith(prefix) && entry.value <= top + 8
+                }
+                .maxByOrNull { entry -> entry.value }
+                ?.let { entry ->
+                    selectedVerseNumber = entry.key
+                        .substring(prefix.length)
+                        .toIntOrNull()
+                }
+        }
+    }
+
+    // Persist the exact verse the reader left on when the pane leaves the
+    // screen (Back to the menu, split view teardown): the chapter-level
+    // save above only records the chapter, so without this the next open
+    // would land on the top of the chapter instead of the last verse.
+    val liveReadingPosition = androidx.compose.runtime.rememberUpdatedState(
+        Triple(selectedBookNumber, selectedChapterNumber, selectedVerseNumber)
+    )
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            val position = liveReadingPosition.value
+            val book = position.first
+            val chapter = position.second
+            if (book != null && chapter != null) {
+                SettingsManager.setLastRead(book, chapter, position.third)
+            }
         }
     }
 
@@ -564,8 +617,29 @@ fun BibleScreen(
             }
 
             selectedChapterNumber != null && event.key == Key.Escape -> {
+                // Esc leaves the chapter for the book index; remember the
+                // verse the reader was on so the next open resumes there.
+                if (chapter != null && book != null) {
+                    SettingsManager.setLastRead(
+                        book.book,
+                        chapter.chapter,
+                        selectedVerseNumber
+                    )
+                }
+                selectedBookNumber = null
                 selectedChapterNumber = null
                 selectedVerseNumber = null
+                selectedVerseDetail = null
+                testamentChosen = true
+                true
+            }
+
+            // Esc climbs the drill-down: book → book list → testaments.
+            selectedBookNumber != null && event.key == Key.Escape -> {
+                selectedBookNumber = null
+                selectedChapterNumber = null
+                selectedVerseNumber = null
+                testamentChosen = true
                 true
             }
 
@@ -603,54 +677,27 @@ fun BibleScreen(
                 // The switcher is shown in both the full Bible screen and
                 // the compact SPLIT pane, so switching Bibles never
                 // requires leaving the reading view.
-                if (showBackButton) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (showBackButton) {
                         Text(
-                            text = "Bible",
-                            style = MaterialTheme.typography.headlineMedium
+                            text = "\u2190 Menu",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.clickable {
+                                SoundManager.play(SoundEvent.Click)
+                                back()
+                            }
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            HistoryButtons(
-                                canBack = historyIndex > 0,
-                                canForward = historyIndex < historyStack.lastIndex,
-                                onBack = ::goHistoryBack,
-                                onForward = ::goHistoryForward
-                            )
-                            TranslationSwitcher(
-                                compact = false,
-                                onOpenGlobalSearch = onOpenGlobalSearch
-                            )
-                        }
                     }
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            HistoryButtons(
-                                canBack = historyIndex > 0,
-                                canForward = historyIndex < historyStack.lastIndex,
-                                onBack = ::goHistoryBack,
-                                onForward = ::goHistoryForward
-                            )
-                            TranslationSwitcher(
-                                compact = true,
-                                onOpenGlobalSearch = onOpenGlobalSearch
-                            )
-                        }
-                    }
+                    Spacer(Modifier.weight(1f))
+                    TranslationSwitcher(
+                        compact = compact,
+                        onOpenGlobalSearch = onOpenGlobalSearch
+                    )
                 }
 
                 if (search.open) {
@@ -714,219 +761,116 @@ fun BibleScreen(
                         modifier = Modifier.weight(1f)
                     )
                 } else {
-                    // Three reading modes: book picker → chapter picker → verses.
-                    // The chapters list, book header, and testament indicator are
-                    // kept out of the reading view so the bible text gets the screen.
+                    // Two levels: the testament / book index, then the one
+                    // chapter the reader opened. Only a single chapter is
+                    // ever displayed.
                     when {
                     selectedBook == null -> {
-                        PrimaryTabRow(selectedTabIndex = testament.ordinal) {
-                            Tab(
-                                selected = testament == Testament.OLD,
-                                onClick = {
-                                    testament = Testament.OLD
-                                    selectedBookNumber = null
-                                    selectedChapterNumber = null
-                                    selectedVerseNumber = null
-                                },
-                                text = { Text("Old Testament") }
-                            )
-                            Tab(
-                                selected = testament == Testament.NEW,
-                                onClick = {
-                                    testament = Testament.NEW
-                                    selectedBookNumber = null
-                                    selectedChapterNumber = null
-                                    selectedVerseNumber = null
-                                },
-                                text = { Text("New Testament") }
-                            )
-                        }
-
-                        Text(
-                            text = "${visibleBooks.size} books",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-
+                        val oldBooks = books.filter { it.book <= 39 }
+                        val newBooks = books.filter { it.book > 39 }
                         BoxWithConstraints(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
                         ) {
-                            val columns = responsiveColumns(maxWidth, 160.dp)
-
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(columns),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight(),
-                                state = bookGridState
-                            ) {
-                                items(visibleBooks) { book ->
-                                BookCard(
-                                    book = book,
-                                    starred = SettingsManager.isBookStarred(book.book),
-                                    onOpen = {
-                                        SoundManager.play(SoundEvent.Click)
-                                        selectedBookNumber = book.book
-                                        selectedChapterNumber = null
-                                        selectedVerseNumber = null
-                                        recordNavigation(book.book, null, null)
-                                    },
-                                    onToggleStar = {
-                                        SoundManager.play(SoundEvent.Click)
-                                        SettingsManager.toggleBookStar(book.book)
-                                    }
-                                )
+                            val showRail = maxWidth >= 820.dp
+                            val barAlpha by animateFloatAsState(
+                                targetValue = if (rootScroll.value > 64) 1f else 0f,
+                                animationSpec = tween(durationMillis = 170),
+                                label = "bible-bar-alpha"
+                            )
+                            val jumpToSection: (String) -> Unit = { id ->
+                                rootSectionOffsets[id]?.let { target ->
+                                    scope.launch { rootScroll.animateScrollTo(target) }
                                 }
                             }
-                        }
-                    }
 
-                    // Whole-book continuous reading: one scrolling passage
-                    // with chapter headings as separators. Clicking a verse
-                    // drops back into the normal chapter view at that verse.
-                    continuousMode -> {
-                        val book = selectedBook
-                        ContinuousReadingView(
-                            book = book,
-                            interlinearMode = interlinearMode,
-                            greekBooks = greekBooks,
-                            strongsLoaded = strongsLoaded,
-                            activeStudyWord = activeStudyWord,
-                            onOpenLexicon = onOpenLexicon,
-                            onToggleStudyWord = { token ->
-                                SoundManager.play(SoundEvent.Click)
-                                activeStudyWord = if (activeStudyWord == token) {
-                                    null
-                                } else {
-                                    token
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                // The bar slot is always reserved so the page
+                                // never shifts when the bar fades in or out.
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(BIBLE_BAR_HEIGHT)
+                                ) {
+                                    if (barAlpha > 0.01f) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer { alpha = barAlpha }
+                                        ) {
+                                            BibleSectionBar(
+                                                title = "The Bible",
+                                                sections = testamentSections,
+                                                activeId = rootActiveSectionId,
+                                                onJump = jumpToSection
+                                            )
+                                        }
+                                    }
                                 }
-                            },
-                            onOpenVerse = { cn, vn ->
-                                SoundManager.play(SoundEvent.Click)
-                                continuousMode = false
-                                selectedChapterNumber = cn
-                                selectedVerseNumber = vn
-                                pendingScrollVerse = vn
-                                recordNavigation(book.book, cn, vn)
-                            },
-                            onExit = {
-                                SoundManager.play(SoundEvent.Click)
-                                continuousMode = false
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                        )
-                    }
 
-                    selectedChapterNumber == null -> {
-                        Text(
-                            text = if (testament == Testament.OLD) {
-                                "Old Testament"
-                            } else {
-                                "New Testament"
-                            },
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = selectedBook.name,
-                                    style = MaterialTheme.typography.titleLarge
-                                )
-                                Text(
-                                    text = "${selectedBook.chapters.size} chapters",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text(
-                                    text = "Read whole book \u2192",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.clickable {
-                                        SoundManager.play(SoundEvent.Click)
-                                        continuousMode = true
-                                        selectedVerseNumber = null
-                                    }
-                                )
-                                Text(
-                                    text = "Back to books",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.clickable {
-                                        SoundManager.play(SoundEvent.Click)
-                                        selectedBookNumber = null
-                                        selectedChapterNumber = null
-                                        selectedVerseNumber = null
-                                    }
-                                )
-                            }
-                        }
-
-                        BoxWithConstraints(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                        ) {
-                            val columns = responsiveColumns(maxWidth, 220.dp)
-
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(columns),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight(),
-                                state = chapterGridState
-                            ) {
-                                items(selectedBook.chapters) { chapter ->
-                                ChapterCard(
-                                    book = selectedBook,
-                                    chapterNumber = chapter.chapter,
-                                    starred = SettingsManager.isChapterStarred(
-                                        selectedBook.book,
-                                        chapter.chapter
-                                    ),
-                                    onOpen = {
-                                        SoundManager.play(SoundEvent.Click)
-                                        selectedChapterNumber = chapter.chapter
-                                        selectedVerseNumber = null
-                                        recordNavigation(selectedBook.book, chapter.chapter, null)
-                                    },
-                                    onToggleStar = {
-                                        SoundManager.play(SoundEvent.Click)
-                                        SettingsManager.toggleChapterStar(
-                                            selectedBook.book,
-                                            chapter.chapter
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                ) {
+                                    if (showRail) {
+                                        BibleSectionRail(
+                                            sections = testamentSections,
+                                            activeId = rootActiveSectionId,
+                                            onJump = jumpToSection
                                         )
                                     }
-                                )
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .verticalScroll(rootScroll)
+                                            .padding(horizontal = if (showRail) 6.dp else 0.dp)
+                                    ) {
+                                        BibleHero(
+                                            eyebrow = "SCRIPTURE",
+                                            title = "The Bible",
+                                            subtitle = "Choose a book to read \u2014 " +
+                                                "${books.size} books in this translation."
+                                        )
+                                        BookSection(
+                                            section = testamentSections[0],
+                                            books = oldBooks,
+                                            onOpen = { book -> openBook(book) },
+                                            onToggleStar = { book ->
+                                                SoundManager.play(SoundEvent.Click)
+                                                SettingsManager.toggleBookStar(book.book)
+                                            },
+                                            onPlaced = { y -> rootSectionOffsets["ot"] = y }
+                                        )
+                                        BookSection(
+                                            section = testamentSections[1],
+                                            books = newBooks,
+                                            onOpen = { book -> openBook(book) },
+                                            onToggleStar = { book ->
+                                                SoundManager.play(SoundEvent.Click)
+                                                SettingsManager.toggleBookStar(book.book)
+                                            },
+                                            onPlaced = { y -> rootSectionOffsets["nt"] = y }
+                                        )
+                                        Spacer(Modifier.height(24.dp))
+                                    }
                                 }
                             }
                         }
                     }
 
                     else -> {
-                        // A chapter is selected — show only the bible text.
-                        selectedChapter?.let { chapter ->
+                        // One chapter at a time: only the selected chapter is
+                        // displayed. A book without a chapter (defensive —
+                        // every navigation sets one) falls back to its first.
+                        (selectedChapter ?: selectedBook.chapters.firstOrNull())
+                            ?.let { chapter ->
                             val goPrev: () -> Unit = {
                                 val next = (chapter.chapter - 1).coerceAtLeast(1)
                                 selectedChapterNumber = next
                                 selectedVerseNumber = null
-                                recordNavigation(selectedBook.book, next, null)
                             }
                             val goNext: () -> Unit = {
                                 val next = (chapter.chapter + 1).coerceAtMost(
@@ -934,7 +878,6 @@ fun BibleScreen(
                                 )
                                 selectedChapterNumber = next
                                 selectedVerseNumber = null
-                                recordNavigation(selectedBook.book, next, null)
                             }
                             val goScrub: (Int) -> Unit = { newChapter ->
                                 val next = newChapter.coerceIn(
@@ -943,14 +886,26 @@ fun BibleScreen(
                                 )
                                 selectedChapterNumber = next
                                 selectedVerseNumber = null
-                                recordNavigation(selectedBook.book, next, null)
                             }
                             val goBack: () -> Unit = {
+                                // Back out to the book index, keeping the exact
+                                // verse as the resume point for the next open.
+                                SettingsManager.setLastRead(
+                                    selectedBook.book,
+                                    chapter.chapter,
+                                    selectedVerseNumber
+                                )
+                                selectedBookNumber = null
                                 selectedChapterNumber = null
                                 selectedVerseNumber = null
+                                selectedVerseDetail = null
+                                testamentChosen = true
                             }
 
                             Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface
+                                ),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(1f)
@@ -961,146 +916,57 @@ fun BibleScreen(
                                         .padding(if (compact) 0.dp else 16.dp)
                                         .fillMaxSize()
                                 ) {
-                                    // Whole-chapter clipboard text ("Book C" then
-                                    // numbered verses, Strong's markup stripped),
-                                    // for the Copy chapter pill below.
-                                    val chapterCopy = remember(
-                                        selectedBook.name,
-                                        chapter.chapter,
-                                        chapter.verses
-                                    ) {
-                                        chapterCopyText(
-                                            selectedBook.name,
-                                            chapter.chapter,
-                                            chapter.verses
-                                        )
-                                    }
                                     Row(
-                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        // The title shrinks first so the header
-                                        // pills never overflow, even in the
-                                        // compact SPLIT pane.
-                                        Text(
-                                            text = "${selectedBook.name} ${chapter.chapter}",
-                                            style = MaterialTheme.typography.titleLarge,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f, fill = false)
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        Column(
+                                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                                            modifier = Modifier.weight(1f)
                                         ) {
-                                            // One-click whole-chapter copy (with
-                                            // transient "✓ Copied" feedback).
-                                            CopyPill(
-                                                copyText = chapterCopy,
-                                                label = "Copy chapter"
-                                            )
-                                            // Interlinear view toggle: cycles
-                                            // OFF → Greek line → word-aligned.
-                                            // Hidden while the active translation
-                                            // IS the Greek module (nothing to
-                                            // interline). While the Greek module
-                                            // is still parsing on the first
-                                            // toggle-on, the pill shows "…".
-                                            if (currentModuleId !=
-                                                BibleRepository.INTERLINEAR_MODULE_ID
+                                            BibleEyebrow(selectedBook.name.uppercase())
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
-                                                InterlinearToggle(
-                                                    mode = interlinearMode,
-                                                    loading = interlinearMode !=
-                                                        InterlinearMode.OFF &&
-                                                        greekBooks == null,
-                                                    alignedAvailable = supportsWordAlignment,
-                                                    onCycle = {
-                                                        interlinearMode =
-                                                            when (interlinearMode) {
-                                                                InterlinearMode.OFF ->
-                                                                    InterlinearMode.LINE
-
-                                                                // Word-aligned only exists for
-                                                                // Strong's-tagged translations;
-                                                                // otherwise cycle straight back off.
-                                                                InterlinearMode.LINE ->
-                                                                    if (supportsWordAlignment) {
-                                                                        InterlinearMode.ALIGNED
-                                                                    } else {
-                                                                        InterlinearMode.OFF
-                                                                    }
-
-                                                                InterlinearMode.ALIGNED ->
-                                                                    InterlinearMode.OFF
-                                                            }
-                                                    }
+                                                SectionNumber("%02d".format(chapter.chapter))
+                                                Text(
+                                                    text = "Chapter ${chapter.chapter}",
+                                                    style = MaterialTheme.typography.headlineSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
                                                 )
                                             }
-                                            // Cross-reference panel toggle: shows the
-                                            // selected verse's derived cross references
-                                            // (parallels / OT quotations / thematic).
-                                            CrossRefsToggle(
-                                                active = crossRefsOpen,
-                                                onClick = {
-                                                    SoundManager.play(SoundEvent.Click)
-                                                    crossRefsOpen = !crossRefsOpen
-                                                }
-                                            )
-                                            // Verse actions: compare across
-                                            // translations / save to a
-                                            // collection. Shown once a verse is
-                                            // selected — like the cross-reference
-                                            // toggle, both key off the selection.
-                                            val selectedForActions = selectedVerseNumber
-                                            if (selectedForActions != null) {
-                                                VerseActionPill(
-                                                    label = "⇄ Compare",
-                                                    tooltip = "Compare this verse across translations",
-                                                    onClick = {
-                                                        onOpenCompare(
-                                                            selectedBook.name,
-                                                            chapter.chapter,
-                                                            selectedForActions
-                                                        )
-                                                    }
-                                                )
-                                                VerseActionPill(
-                                                    label = "＋ Collection",
-                                                    tooltip = "Add this verse to a personal collection",
-                                                    onClick = {
-                                                        addToCollectionOpen = true
-                                                    }
-                                                )
-                                            }
-                                            // Range copy + PDF export live behind a
-                                            // small "More ▾" menu so the header
-                                            // stays tidy in the compact SPLIT pane.
-                                            ChapterMoreMenu(
-                                                chapterCopy = chapterCopy,
-                                                onOpenRangeDialog = { copyRangeOpen = true },
-                                                onOpenGlobalSearch = onOpenGlobalSearch,
-                                                onExportPdf = {
-                                                    NotePdfExporter.exportChapterAsPdf(
-                                                        bookName = selectedBook.name,
-                                                        chapterNumber = chapter.chapter,
-                                                        verses = chapter.verses,
-                                                        translationName = BibleCatalog
-                                                            .entryFor(SettingsManager.translation)
-                                                            ?.displayName
-                                                    )
-                                                }
-                                            )
-                                            Text(
-                                                text = "← Chapters",
-                                                color = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.clickable {
-                                                    SoundManager.play(SoundEvent.Click)
-                                                    goBack()
-                                                }
-                                            )
                                         }
+                                        // Mark the chapter on screen read;
+                                        // feeds the Home progress rings and
+                                        // the reading statistics.
+                                        ChapterReadButton(
+                                            read = SettingsManager.isChapterRead(
+                                                selectedBook.book,
+                                                chapter.chapter
+                                            ),
+                                            onToggle = {
+                                                SettingsManager.setChapterRead(
+                                                    selectedBook.book,
+                                                    chapter.chapter,
+                                                    !SettingsManager.isChapterRead(
+                                                        selectedBook.book,
+                                                        chapter.chapter
+                                                    )
+                                                )
+                                            }
+                                        )
+                                        ChromeIconButton(
+                                            icon = RibbonIcons.Back,
+                                            description = "Back to the books",
+                                            onClick = {
+                                                SoundManager.play(SoundEvent.Click)
+                                                goBack()
+                                            }
+                                        )
                                     }
 
                                     ChapterJumpStrip(
@@ -1115,49 +981,6 @@ fun BibleScreen(
                                             }
                                         }
                                     )
-
-                                    // Cross-reference panel for the selected verse,
-                                    // derived from shared Strong's lemmas (no curated
-                                    // dataset is bundled, so nothing is invented).
-                                    if (crossRefsOpen) {
-                                        val selectedVerse = selectedVerseNumber
-                                        if (selectedVerse != null) {
-                                            CrossReferencesPanel(
-                                                bookNumber = selectedBook.book,
-                                                chapterNumber = chapter.chapter,
-                                                verseNumber = selectedVerse,
-                                                books = books,
-                                                onOpenReference = { bookName, cn, vn ->
-                                                    val targetBook = books.find {
-                                                        it.name.equals(bookName, ignoreCase = true)
-                                                    }
-                                                    if (targetBook != null) {
-                                                        jumpToVerse(targetBook.book, cn, vn)
-                                                    }
-                                                }
-                                            )
-                                        } else {
-                                            Text(
-                                                text = "Select a verse to see its cross references.",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    // "Add to collection" dialog for the
-                                    // selected verse (opened via the header
-                                    // pill). The verse is non-null whenever
-                                    // the pill is visible.
-                                    if (addToCollectionOpen && selectedVerseNumber != null) {
-                                        AddToCollectionDialog(
-                                            bookNumber = selectedBook.book,
-                                            bookName = selectedBook.name,
-                                            chapter = chapter.chapter,
-                                            verse = selectedVerseNumber ?: 1,
-                                            onDismiss = { addToCollectionOpen = false }
-                                        )
-                                    }
 
                                     Row(
                                         modifier = Modifier
@@ -1248,66 +1071,102 @@ fun BibleScreen(
                                                 // Compare by canonical book number so a note's
                                                 // reference resolves across languages too (e.g.
                                                 // German `$Lukas` hovering over English "Luke").
+                                                // [BibleReferenceSelection.highlights] covers the
+                                                // whole ranged span, so hovering `John 3:16-18`
+                                                // tints all three verses (and a chapter-level
+                                                // reference tints the chapter).
                                                 val hoverHighlighted = hovered != null &&
                                                     BibleRepository.bookNumberFor(hovered.book) == selectedBook.book &&
-                                                    when {
-                                                        hovered.verse != null ->
-                                                            hovered.chapter == chapter.chapter &&
-                                                                hovered.verse == verse.verse
-
-                                                        hovered.chapter != null ->
-                                                            hovered.chapter == chapter.chapter
-
-                                                        else -> false
+                                                    hovered.highlights(chapter.chapter, verse.verse)
+                                                // The reference the pane was navigated to
+                                                // stays tinted until the reader opens
+                                                // another book, so the arrival target is
+                                                // never just a fleeting scroll.
+                                                val referenceHighlighted = activeReference
+                                                    ?.takeIf {
+                                                        BibleRepository.bookNumberFor(it.book) ==
+                                                            selectedBook.book
                                                     }
+                                                    ?.highlights(chapter.chapter, verse.verse) == true
                                                 VerseRow(
                                                     bookName = selectedBook.name,
                                                     bookNumber = selectedBook.book,
                                                     chapterNumber = chapter.chapter,
                                                     verseNumber = verse.verse,
                                                     text = verse.text,
-                                                    selected = selectedVerseNumber == verse.verse,
+                                                    // Clicking the verse opens its
+                                                    // reference card (mentions,
+                                                    // similar texts, Hebrew);
+                                                    // clicking it again closes it.
+                                                    onClick = {
+                                                        SoundManager.play(SoundEvent.Click)
+                                                        selectedVerseDetail =
+                                                            if (selectedVerseDetail == verse.verse) {
+                                                                null
+                                                            } else {
+                                                                verse.verse
+                                                            }
+                                                    },
                                                     interlinearGreek = greekVerseByNumber[verse.verse],
                                                     onOpenLexicon = onOpenLexicon,
                                                     interlinearAligned =
                                                         interlinearMode == InterlinearMode.ALIGNED,
-                                                    hoverHighlighted = hoverHighlighted,
+                                                    hoverHighlighted =
+                                                        hoverHighlighted || referenceHighlighted,
+                                                    onExportVerse = { startVerse ->
+                                                        val cards = chapter.verses.map { v ->
+                                                            CardVerse(
+                                                                chapter = chapter.chapter,
+                                                                verse = v.verse,
+                                                                text = v.text
+                                                            )
+                                                        }
+                                                        val index = cards.indexOfFirst {
+                                                            it.verse == startVerse
+                                                        }.coerceAtLeast(0)
+                                                        exportSeed = VerseExportSeed(
+                                                            bookName = selectedBook.name,
+                                                            chapter = chapter.chapter,
+                                                            verses = cards,
+                                                            startIndex = index,
+                                                            endIndex = index
+                                                        )
+                                                    },
+                                                    onExportRange = { startVerse ->
+                                                        val cards = chapter.verses.map { v ->
+                                                            CardVerse(
+                                                                chapter = chapter.chapter,
+                                                                verse = v.verse,
+                                                                text = v.text
+                                                            )
+                                                        }
+                                                        val index = cards.indexOfFirst {
+                                                            it.verse == startVerse
+                                                        }.coerceAtLeast(0)
+                                                        exportSeed = VerseExportSeed(
+                                                            bookName = selectedBook.name,
+                                                            chapter = chapter.chapter,
+                                                            verses = cards,
+                                                            startIndex = index,
+                                                            endIndex = cards.lastIndex
+                                                        )
+                                                    },
                                                     wordCountsInChapter = chapterWordCounts,
                                                     hoveredWordNumber = hoveredWordNumber,
                                                     onHoverWord = { hoveredWordNumber = it },
                                                     onOpenNoteTitle = onOpenNoteTitle,
-                                                    onClick = {
-                                                        SoundManager.play(SoundEvent.Click)
-                                                        val next = if (
-                                                            selectedVerseNumber == verse.verse
-                                                        ) {
-                                                            null
-                                                        } else {
-                                                            verse.verse
-                                                        }
-                                                        selectedVerseNumber = next
-                                                        recordNavigation(
-                                                            selectedBook.book,
-                                                            chapter.chapter,
-                                                            next
-                                                        )
-                                                    },
-                                                    onToggleMarker = { markerColor ->
-                                                        SoundManager.play(SoundEvent.Click)
-                                                        SettingsManager.setVerseMarkerColor(
-                                                            selectedBook.book,
-                                                            chapter.chapter,
-                                                            verse.verse,
-                                                            markerColor
-                                                        )
-                                                    },
                                                     onVersePositioned = { verseNum, y ->
                                                         // Mutate the raw map and bump a
                                                         // version counter so the parent
                                                         // LaunchedEffect re-fires without
                                                         // allocating a new stateful map on
-                                                        // every callback.
-                                                        verseYOffsetsMap[verseNum] = y
+                                                        // every callback. Keyed by chapter
+                                                        // so a stale offset from the
+                                                        // previous chapter can never be
+                                                        // mistaken for this one's.
+                                                        verseYOffsetsMap[
+                                                            "${selectedBook.book}:${chapter.chapter}:$verseNum"
+                                                        ] = y
                                                         verseYOffsetsVersion++
                                                     },
                                                     strongsLoaded = strongsLoaded,
@@ -1323,6 +1182,26 @@ fun BibleScreen(
                                                         }
                                                     }
                                                 )
+                                                if (selectedVerseDetail == verse.verse) {
+                                                    VerseDetailPanel(
+                                                        bookNumber = selectedBook.book,
+                                                        bookName = selectedBook.name,
+                                                        chapterNumber = chapter.chapter,
+                                                        verseNumber = verse.verse,
+                                                        verseText = verse.text,
+                                                        books = books,
+                                                        hebrewBooks = hebrewBooks,
+                                                        onOpenNoteTitle = onOpenNoteTitle,
+                                                        onOpenReference = { bn, ch, v ->
+                                                            selectedVerseDetail = null
+                                                            jumpToVerse(bn, ch, v)
+                                                        },
+                                                        onClose = {
+                                                            SoundManager.play(SoundEvent.Click)
+                                                            selectedVerseDetail = null
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
 
@@ -1339,36 +1218,20 @@ fun BibleScreen(
                     }
                 }
 
-                    if (showBackButton) {
-                        Text(
-                            text = "Back",
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable {
-                                SoundManager.play(SoundEvent.Click)
-                                back()
-                            }
-                        )
-                    }
                 }
-            }
-        }
-
-        // Copy-range dialog — opened from the chapter header's "More ▾"
-        // menu. Rendered at the screen root so it overlays the pane.
-        if (copyRangeOpen) {
-            selectedChapter?.let { chapter ->
-                CopyRangeDialog(
-                    bookName = selectedBook.name,
-                    chapterNumber = chapter.chapter,
-                    verses = chapter.verses,
-                    onDismiss = { copyRangeOpen = false },
-                    onOpenGlobalSearch = onOpenGlobalSearch
-                )
             }
         }
 
         // Ctrl+G jump-to-verse dialog. Passed the open book (if any) so
         // it pre-fills; the Go action jumps the pane to the target verse.
+        // Right-click export dialog (verse or range as postcard / deck).
+        exportSeed?.let { seed ->
+            VerseExportDialog(
+                seed = seed,
+                onDismiss = { exportSeed = null }
+            )
+        }
+
         if (jumpDialogOpen) {
             JumpToVerseDialog(
                 books = books,
@@ -1384,79 +1247,6 @@ fun BibleScreen(
 }
 
 
-/**
- * Compact "⛓ References" pill in the chapter header, mirroring the
- * InterlinearToggle's visual language: a primary-container pill while the
- * cross-reference panel is open, a dimmed surface pill otherwise. A hover
- * tooltip explains what it shows.
- */
-@Composable
-private fun CrossRefsToggle(
-    active: Boolean,
-    onClick: () -> Unit
-) {
-    ToolbarTip(label = "Cross references: parallels, Old-Testament quotations and thematically related passages for the selected verse") {
-        Surface(
-            shape = PillShape,
-            color = if (active) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
-            },
-            modifier = Modifier.clickable(onClick = onClick)
-        ) {
-            Text(
-                text = if (active) "⛓·on" else "⛓",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (active) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-            )
-        }
-    }
-}
-
-
-/**
- * One-shot action pill for the chapter header's verse actions (compare /
- * collection), mirroring the CrossRefsToggle visual language but firing
- * once instead of toggling.
- */
-@Composable
-private fun VerseActionPill(
-    label: String,
-    tooltip: String,
-    onClick: () -> Unit
-) {
-    ToolbarTip(label = tooltip) {
-        Surface(
-            shape = PillShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
-            modifier = Modifier.clickable(onClick = onClick)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-            )
-        }
-    }
-}
-
-
-/**
- * Quick translation switcher for the Bible pane header. One dropdown
- * lists every discovered module grouped by language (scrollable — there
- * are ~90 of them). Picking one persists it via SettingsManager (module
- * id + language), which triggers `BibleRepository.books()` to reload and
- * recompose the pane on the same book/chapter in the new translation.
- * Reading [SettingsManager.translation] here keeps the label in sync with
- * the Settings picker.
- */
 @Composable
 private fun TranslationSwitcher(
     compact: Boolean,
@@ -1575,90 +1365,6 @@ private fun TranslationSwitcher(
 }
 
 
-/**
- * "More ▾" menu in the chapter view header: copy a verse range (opens
- * the [CopyRangeDialog]) and export the chapter as a PDF. The whole-
- * chapter copy has its own one-click [CopyPill] next to this menu.
- */
-@Composable
-private fun ChapterMoreMenu(
-    chapterCopy: String,
-    onOpenRangeDialog: () -> Unit,
-    onExportPdf: () -> Unit,
-    onOpenGlobalSearch: () -> Unit = {}
-) {
-    val clipboard = LocalClipboard.current
-    val clipboardScope = rememberCoroutineScope()
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        Surface(
-            shape = PillShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
-            modifier = Modifier.clickable {
-                SoundManager.play(SoundEvent.Click)
-                expanded = true
-            }
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Text(
-                    text = "More",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Icon(
-                    imageVector = RibbonIcons.ChevronDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            // Ctrl+F while this dropdown (a focusable popup window) is
-            // open: dismiss it and open the global search — the root
-            // handler can't see the popup.
-            val dropdownKeyHandler = globalSearchDialogKeyHandler(
-                onDismiss = { expanded = false },
-                onOpenGlobalSearch = onOpenGlobalSearch
-            )
-            Column(modifier = Modifier.onPreviewKeyEvent(dropdownKeyHandler)) {
-                DropdownMenuItem(
-                    text = { Text("Copy whole chapter") },
-                    onClick = {
-                        expanded = false
-                        SoundManager.play(SoundEvent.Click)
-                        clipboardScope.launch {
-                            clipboard.setClipEntry(plainTextClipEntry(chapterCopy))
-                        }
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Copy verse range\u2026") },
-                    onClick = {
-                        expanded = false
-                        SoundManager.play(SoundEvent.Click)
-                        onOpenRangeDialog()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Export chapter as PDF\u2026") },
-                    onClick = {
-                        expanded = false
-                        SoundManager.play(SoundEvent.Click)
-                        onExportPdf()
-                    }
-                )
-            }
-        }
-    }
-}
 
 
 /**
@@ -1676,366 +1382,6 @@ private fun GreekNtOnlyHint(modifier: Modifier = Modifier) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier
-    )
-}
-
-
-/**
- * Whole-book continuous reading: every chapter of [book] rendered as one
- * scrolling passage, with chapter headings as separators. Each verse is a
- * row (verse number + text — Strong's-marked verses render clickable
- * word-study tokens) whose click drops back into the normal chapter view
- * at that verse; the "← Chapters" link exits without jumping. When the
- * interlinear mode is on it renders beneath each verse too, via the same
- * shared [VerseInterlinear] as the chapter view, so both modes stay
- * consistent across the whole book.
- */
-@Composable
-private fun ContinuousReadingView(
-    book: Book,
-    // Interlinear support — passed through so the whole-book view matches
-    // the chapter view exactly: the active mode (OFF / LINE / ALIGNED),
-    // the lazily loaded Greek TR module, and the word-study wiring.
-    interlinearMode: InterlinearMode,
-    greekBooks: List<Book>?,
-    strongsLoaded: Boolean,
-    activeStudyWord: StudyWordToken?,
-    onToggleStudyWord: (StudyWordToken) -> Unit,
-    /** Opens the central lexicon at a Strong's number (wired by the host
-     *  screen; defaults to no-op). */
-    onOpenLexicon: (String) -> Unit = {},
-    onOpenVerse: (chapterNumber: Int, verseNumber: Int) -> Unit,
-    onExit: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val scrollState = rememberScrollState()
-    Card(
-        modifier = modifier
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(16.dp)
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "${book.name} \u2014 whole book",
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Text(
-                    text = "\u2190 Chapters",
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(onClick = onExit)
-                )
-            }
-            Text(
-                text = "Click any verse to open it in the chapter view.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-            )
-
-            book.chapters.forEach { chapter ->
-                Text(
-                    text = "Chapter ${chapter.chapter}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-                val showInterlinear = interlinearMode != InterlinearMode.OFF
-                // trparsed is New-Testament-only: instead of silently
-                // rendering nothing under OT verses, explain why there is
-                // no Greek line for this book.
-                if (showInterlinear && book.book <= 39) {
-                    GreekNtOnlyHint(
-                        modifier = Modifier.padding(bottom = 2.dp)
-                    )
-                }
-                val aligned = interlinearMode == InterlinearMode.ALIGNED
-                // Greek TR text per (chapter, verse) of this book, built
-                // once per book while the interlinear view is on. trparsed
-                // is New-Testament-only, so Old-Testament books simply
-                // yield an empty map (no interlinear blocks, as in the
-                // chapter view).
-                val greekByRef: Map<Pair<Int, Int>, String> = remember(
-                    book,
-                    greekBooks,
-                    showInterlinear
-                ) {
-                    if (showInterlinear) {
-                        BibleRepository.greekVersesForBook(greekBooks, book.book)
-                    } else {
-                        emptyMap()
-                    }
-                }
-
-                chapter.verses.forEach { verse ->
-                    // Strong's-marked verses render clickable tokens (word
-                    // study) exactly like the chapter view's VerseRow.
-                    val tokens = remember(verse.text) {
-                        parseWordStudyTokens(verse.text)
-                    }
-                    val activeForVerse = activeStudyWord?.takeIf {
-                        it.bookNumber == book.book &&
-                            it.chapter == chapter.chapter &&
-                            it.verse == verse.verse
-                    }
-                    val toggleWord: (StrongsToken) -> Unit = { token ->
-                        onToggleStudyWord(
-                            StudyWordToken(
-                                bookNumber = book.book,
-                                chapter = chapter.chapter,
-                                verse = verse.verse,
-                                word = token.word,
-                                number = token.number,
-                                parsing = token.parsing
-                            )
-                        )
-                    }
-                    val greekText = if (showInterlinear) {
-                        greekByRef[chapter.chapter to verse.verse]
-                    } else {
-                        null
-                    }
-
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onOpenVerse(chapter.chapter, verse.verse)
-                                }
-                                .padding(vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = verse.verse.toString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 3.dp)
-                            )
-                            if (tokens.isEmpty()) {
-                                Text(
-                                    text = stripWordStudyMarkup(verse.text),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            } else {
-                                StrongsVerseText(
-                                    text = verse.text,
-                                    tokens = tokens,
-                                    activeNumber = activeForVerse?.number,
-                                    onToggle = toggleWord,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                        // Interlinear block, shared with the chapter view
-                        // (same LINE / word-aligned rendering). It sits
-                        // OUTSIDE the clickable Row — deliberately unlike
-                        // the chapter view, where the Greek line's
-                        // background toggles verse selection — so the
-                        // whole-book reader never navigates by accident;
-                        // the numbers themselves still feed word study.
-                        if (greekText != null) {
-                            // Indent under the verse text (number column +
-                            // 8 dp spacing).
-                            Box(modifier = Modifier.padding(start = 24.dp)) {
-                                VerseInterlinear(
-                                    englishText = verse.text,
-                                    greekText = greekText,
-                                    aligned = aligned,
-                                    activeNumber = activeForVerse?.number,
-                                    onToggleStudyWord = toggleWord
-                                )
-                            }
-                        }
-                        // Open word-study MINI panel, outside the clickable
-                        // Row so closing it never navigates. The whole-book
-                        // reader shows the compact inline card (not the full
-                        // panel the chapter view uses) so a studied word
-                        // doesn't push the continuous passage around.
-                        if (activeForVerse != null) {
-                            WordStudyMiniPanel(
-                                token = activeForVerse,
-                                loaded = strongsLoaded,
-                                onClose = { onToggleStudyWord(activeForVerse) },
-                                onOpenLexicon = { onOpenLexicon(it) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        if (scrollState.maxValue > 0) {
-            VerticalScrollbar(
-                adapter = rememberScrollbarAdapter(scrollState),
-                modifier = Modifier
-                    .align(Alignment.End)
-                    .fillMaxHeight()
-            )
-        }
-    }
-}
-
-
-/**
- * "Copy verse range" dialog for the chapter view: From / To verse fields
- * (digit-only, validated against the chapter) and a Copy button that
- * writes `Book C:From–To` plus the numbered verses to the clipboard.
- */
-@Composable
-private fun CopyRangeDialog(
-    bookName: String,
-    chapterNumber: Int,
-    verses: List<Verse>,
-    onDismiss: () -> Unit,
-    onOpenGlobalSearch: () -> Unit = {}
-) {
-    val clipboard = LocalClipboard.current
-    val clipboardScope = rememberCoroutineScope()
-    var fromText by remember { mutableStateOf("1") }
-    var toText by remember { mutableStateOf(verses.size.toString()) }
-    val from = fromText.toIntOrNull()
-    val to = toText.toIntOrNull()
-    val valid = from != null && to != null &&
-        from in 1..verses.size && to in 1..verses.size && from <= to
-
-    // Ctrl+F while this dialog (a separate window) has focus: dismiss it
-    // and open the global search — the root handler can't see it.
-    val dialogKeyHandler = globalSearchDialogKeyHandler(onDismiss, onOpenGlobalSearch)
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Copy verse range") },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.onPreviewKeyEvent(dialogKeyHandler)
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = fromText,
-                        onValueChange = {
-                            fromText = it.filter { c -> c.isDigit() }.take(3)
-                        },
-                        label = { Text("From verse (1\u2013${verses.size})") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = toText,
-                        onValueChange = {
-                            toText = it.filter { c -> c.isDigit() }.take(3)
-                        },
-                        label = { Text("To verse (1\u2013${verses.size})") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Text(
-                    text = "Copies \u201C$bookName $chapterNumber" +
-                        "${from ?: ""}\u2013${to ?: ""}\u201D followed by the " +
-                        "numbered verses.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = valid,
-                modifier = Modifier.onPreviewKeyEvent(dialogKeyHandler),
-                onClick = {
-                    SoundManager.play(SoundEvent.Click)
-                    clipboardScope.launch {
-                        clipboard.setClipEntry(
-                            plainTextClipEntry(
-                                rangeCopyText(
-                                    bookName = bookName,
-                                    chapter = chapterNumber,
-                                    from = from!!,
-                                    to = to!!,
-                                    verses = verses
-                                )
-                            )
-                        )
-                    }
-                    onDismiss()
-                }
-            ) { Text("Copy") }
-        },
-        dismissButton = {
-            TextButton(
-                modifier = Modifier.onPreviewKeyEvent(dialogKeyHandler),
-                onClick = {
-                    SoundManager.play(SoundEvent.Click)
-                    onDismiss()
-                }
-            ) { Text("Cancel") }
-        }
-    )
-}
-
-
-/** One history-stack entry: a (canonical book number, chapter, verse). */
-private data class NavPoint(
-    val bookNumber: Int,
-    val chapter: Int?,
-    val verse: Int?
-)
-
-
-/**
- * Back / forward affordance for the reading-pane history stack. Renders
- * as small primary chevrons, dimmed when the stack can't move that way.
- */
-@Composable
-private fun HistoryButtons(
-    canBack: Boolean,
-    canForward: Boolean,
-    onBack: () -> Unit,
-    onForward: () -> Unit
-) {
-    val dimmed = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
-    val active = MaterialTheme.colorScheme.primary
-    Text(
-        text = "\u2190",
-        style = MaterialTheme.typography.titleMedium,
-        color = if (canBack) active else dimmed,
-        modifier = Modifier
-            .then(
-                if (canBack) Modifier.clickable {
-                    SoundManager.play(SoundEvent.Click)
-                    onBack()
-                } else Modifier
-            )
-            .padding(horizontal = 4.dp, vertical = 2.dp)
-    )
-    Text(
-        text = "\u2192",
-        style = MaterialTheme.typography.titleMedium,
-        color = if (canForward) active else dimmed,
-        modifier = Modifier
-            .then(
-                if (canForward) Modifier.clickable {
-                    SoundManager.play(SoundEvent.Click)
-                    onForward()
-                } else Modifier
-            )
-            .padding(horizontal = 4.dp, vertical = 2.dp)
     )
 }
 
@@ -2220,63 +1566,47 @@ private fun JumpToVerseDialog(
 }
 
 
+
 /**
- * Interlinear toggle pill in the chapter header: "ΑΩ" (accented when
- * active) toggles the Greek TR verse beneath each NT verse. A hover
- * tooltip explains the mode.
+ * One testament section of the Bible index: its numbered heading followed by
+ * every book as one full-width numbered row. Reports its Y offset so the bar
+ * / rail can jump here.
  */
 @Composable
-private fun InterlinearToggle(
-    mode: InterlinearMode,
-    // True while the Greek module is still parsing on the first toggle-on;
-    // the pill shows "…" so the toggle doesn't look like it did nothing.
-    loading: Boolean,
-    // Whether the active translation carries Strong's markup, so the
-    // word-aligned mode is actually possible (the pill then never shows
-    // the aligned state when it can't be rendered).
-    alignedAvailable: Boolean,
-    onCycle: () -> Unit
+private fun BookSection(
+    section: BibleNavSection,
+    books: List<Book>,
+    onOpen: (Book) -> Unit,
+    onToggleStar: (Book) -> Unit,
+    onPlaced: (Int) -> Unit
 ) {
-    val active = mode != InterlinearMode.OFF
-    ToolbarTip(
-        label = when {
-            loading -> "Loading the Greek TR module\u2026"
-            mode == InterlinearMode.ALIGNED -> "Word-aligned Greek \u2014 pairs each Greek token with the English word sharing its Strong's number"
-            mode == InterlinearMode.LINE && alignedAvailable -> "Interlinear \u2014 click again for word-aligned"
-            mode == InterlinearMode.LINE -> "Interlinear (word-aligned needs a Strong's-tagged translation, e.g. KJV with Strongs)"
-            else -> "Interlinear: show the Greek TR beneath each verse"
-        }
-    ) {
-        Surface(
-            shape = PillShape,
-            color = if (active) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
-            },
-            modifier = Modifier.clickable {
-                SoundManager.play(SoundEvent.Click)
-                onCycle()
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+                onPlaced(coords.positionInParent().y.toInt())
             }
+    ) {
+        BibleSectionHeader(
+            number = section.number,
+            title = section.title,
+            subtitle = "${books.size} books"
+        )
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text(
-                text = when {
-                    loading -> "\u0391\u03A9\u2026"
-                    mode == InterlinearMode.ALIGNED -> "\u0391\u03A9\u2261\u00B7on"
-                    mode == InterlinearMode.LINE -> "\u0391\u03A9\u00B7on"
-                    else -> "\u0391\u03A9"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = if (active) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-            )
+            books.forEachIndexed { index, book ->
+                BookCard(
+                    book = book,
+                    index = index + 1,
+                    starred = SettingsManager.isBookStarred(book.book),
+                    readChapters = SettingsManager.readChapterCount(book.book),
+                    onOpen = { onOpen(book) },
+                    onToggleStar = { onToggleStar(book) }
+                )
+            }
         }
     }
 }
-
-
-

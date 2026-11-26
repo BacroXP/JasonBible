@@ -4,7 +4,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import data.MediaFileKind
 import data.MediaService
@@ -126,57 +129,124 @@ internal fun EmbeddedPlayer(modifier: Modifier = Modifier) {
 
 
 /**
- * The bare Spotify embed widget, hosted on the [JFXPanel] bridged in via
- * [SwingPanel] — no header, title or progress chrome and NO card behind
- * it, because Spotify's widget is already a complete player with its own
- * artwork, labels, controls and background. Sized to Spotify's COMPACT
- * player (400x80): the widget is fluid and fills that canvas
- * edge-to-edge, so there is no black gutter around it (a taller canvas
- * leaves a dead band below the widget). A small close button sits in the
- * corner, as the widget has no way to dismiss itself.
+ * The Spotify embed widget, wrapped in the SAME card chrome as the video
+ * and compact audio players (see [PlayerCard]): rounded surface, service
+ * glyph + label in the header and a close button. Spotify's official
+ * COMPACT embed (400x80) is already a complete player with its own
+ * artwork, labels and controls, so it is rendered bare inside the card —
+ * no title or progress chrome of ours.
  *
- * Why there is no Surface card here: the JFXPanel is a heavyweight AWT
- * component that overpaints Compose drawing, and on Linux/OpenGL Compose
- * has no interop blending (that only exists for Direct3D/Metal), so a
- * genuinely transparent scene would render BLACK behind the widget. The
- * closest achievable look is a borderless widget whose FX scene is filled
- * with the app's own window background color — pushed via
- * [MediaPlayerController.updateSurfaceColor] — so the widget's rounded
- * corners blend seamlessly into whatever is behind it, with no visible
- * canvas or card.
+ * The widget's own canvas is filled with the app's surface color (pushed
+ * via [MediaPlayerController.updateSurfaceColor]) so it blends into the
+ * card; Linux/OpenGL Compose has no heavyweight interop blending, so a
+ * transparent scene would render BLACK. The card frame sits OUTSIDE the
+ * JFXPanel's bounds (inside the card padding), so it paints normally —
+ * the overpainting JFXPanel only covers the widget area itself.
  */
 @Composable
 private fun SpotifyWidget(modifier: Modifier = Modifier) {
     // Push the app's window background color (colorScheme.surface — the
-    // root window Surface's fill) into the JavaFX side so the (rounded)
-    // corners of the transparent media canvas blend straight into the app
-    // behind the widget instead of painting black.
+    // root window Surface's fill, and this card's fill) into the JavaFX
+    // side so the widget's corners blend into the card instead of
+    // painting black.
     val surface = MaterialTheme.colorScheme.surface
     LaunchedEffect(surface) {
         MediaPlayerController.updateSurfaceColor(surface.toArgb().toLong() and 0xFFFFFFFFL)
     }
-    Box(modifier = modifier.width(400.dp)) {
-        val panel = remember { JFXPanel().also { MediaPlayerController.attachHost(it) } }
+    val panel = remember { JFXPanel().also { MediaPlayerController.attachHost(it) } }
+    // 424dp card = 400dp widget + the card's 12dp padding on both sides,
+    // so the embed keeps the size it is designed for.
+    PlayerCard(
+        service = MediaService.SPOTIFY,
+        width = 424.dp,
+        modifier = modifier,
+        controls = {
+            StopButton(
+                onStop = { MediaPlayerController.stop() },
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    ) {
         SwingPanel(
             factory = { panel },
             update = { MediaPlayerController.attachHost(it) },
             // No AWT background: the FX scene fill paints the whole canvas
-            // with the window background color, so nothing white ever
-            // flashes behind the widget.
+            // with the app's surface color, so nothing white ever flashes
+            // behind the widget.
             background = Color.Transparent,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(80.dp)
         )
-        DisposableEffect(panel) {
-            onDispose { MediaPlayerController.detachHost(panel) }
+    }
+    DisposableEffect(panel) {
+        onDispose { MediaPlayerController.detachHost(panel) }
+    }
+}
+
+
+/**
+ * The shared player card: a rounded surface with the app's standard card
+ * chrome (surface fill, outline border, service glyph in a rounded tile,
+ * accent label) and a [controls] slot on the right of the header. Every
+ * embedded-player variant — Spotify, video, audio-only — renders through
+ * this one container so the popup always matches the rest of the app.
+ */
+@Composable
+private fun PlayerCard(
+    service: MediaService?,
+    width: Dp,
+    modifier: Modifier = Modifier,
+    controls: @Composable RowScope.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Surface(
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 6.dp,
+        shadowElevation = 8.dp,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        ),
+        modifier = modifier
+            .width(width)
+            .clip(shape)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // ---- Header: service glyph, label, variant controls ----
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
+                ) {
+                    Icon(
+                        imageVector = service?.icon ?: RibbonIcons.MediaPlay,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    text = service?.label ?: "Media",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MediaAccent,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                controls()
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            content()
         }
-        StopButton(
-            onStop = { MediaPlayerController.stop() },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(6.dp)
-        )
     }
 }
 
@@ -196,7 +266,6 @@ private fun VisualPlayerPanel(
     fraction: Float,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(14.dp)
     // Live loop-toggle state (shared with the media cards' overlays).
     val looping = MediaPlayerState.looping
 
@@ -206,122 +275,70 @@ private fun VisualPlayerPanel(
     LaunchedEffect(surface) {
         MediaPlayerController.updateSurfaceColor(surface.toArgb().toLong() and 0xFFFFFFFFL)
     }
-    Surface(
-        shape = shape,
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-        ),
-        modifier = modifier
-            .width(480.dp)
-            .clip(shape)
-    ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            // ---- Header: service glyph, label, pause/play, close ----
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
-                ) {
-                    Icon(
-                        imageVector = service?.icon ?: RibbonIcons.MediaPlay,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(
-                    text = service?.label ?: "Media",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MediaAccent,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                PlayPauseButton(
-                    playing = playing,
-                    onToggle = { MediaPlayerController.togglePlayPause() },
-                    modifier = Modifier.size(30.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                LoopButton(
-                    active = looping,
-                    onToggle = { MediaPlayerController.setLooping(!looping) },
-                    modifier = Modifier.size(30.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                // Open the media on its own service page (the YouTube
-                // watch page, etc.) in the default browser.
-                OpenExternalButton(
-                    onOpen = {
-                        MediaPlayerState.currentUrl?.let { openExternalUrl(it) }
-                    },
-                    modifier = Modifier.size(30.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                StopButton(
-                    onStop = { MediaPlayerController.stop() },
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            // ---- The media surface itself ----
-            Spacer(modifier = Modifier.height(8.dp))
-            val panel = remember { JFXPanel().also { MediaPlayerController.attachHost(it) } }
-            SwingPanel(
-                factory = { panel },
-                update = { MediaPlayerController.attachHost(it) },
-                // Inset by the border width so the FX canvas doesn't
-                // overpaint the card's border (rounding is on the FX side).
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(270.dp)
-                    .padding(1.dp)
+    val panel = remember { JFXPanel().also { MediaPlayerController.attachHost(it) } }
+    PlayerCard(
+        service = service,
+        width = 480.dp,
+        modifier = modifier,
+        controls = {
+            PlayPauseButton(
+                playing = playing,
+                onToggle = { MediaPlayerController.togglePlayPause() },
+                modifier = Modifier.size(30.dp)
             )
-            DisposableEffect(panel) {
-                onDispose { MediaPlayerController.detachHost(panel) }
-            }
-
-            // ---- Title ----
-            if (!title.isNullOrBlank()) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-
-            // ---- Thin live progress bar ----
-            Spacer(modifier = Modifier.height(6.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            ) {
-                Box(
-                    // A minimum sliver keeps the bar visible the instant
-                    // playback starts (fraction is 0 until the first event).
-                    modifier = Modifier
-                        .fillMaxWidth(fraction.coerceIn(0.02f, 1f))
-                        .fillMaxHeight()
-                        .background(MediaAccent)
-                )
-            }
+            Spacer(modifier = Modifier.width(6.dp))
+            LoopButton(
+                active = looping,
+                onToggle = { MediaPlayerController.setLooping(!looping) },
+                modifier = Modifier.size(30.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            // Open the media on its own service page (the YouTube watch
+            // page, etc.) in the default browser.
+            OpenExternalButton(
+                onOpen = {
+                    MediaPlayerState.currentUrl?.let { openExternalUrl(it) }
+                },
+                modifier = Modifier.size(30.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            StopButton(
+                onStop = { MediaPlayerController.stop() },
+                modifier = Modifier.size(24.dp)
+            )
         }
+    ) {
+        // ---- The media surface itself ----
+        SwingPanel(
+            factory = { panel },
+            update = { MediaPlayerController.attachHost(it) },
+            // Inset by the border width so the FX canvas doesn't overpaint
+            // the card's border (rounding is on the FX side).
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(270.dp)
+                .padding(1.dp)
+        )
+        DisposableEffect(panel) {
+            onDispose { MediaPlayerController.detachHost(panel) }
+        }
+
+        // ---- Title ----
+        if (!title.isNullOrBlank()) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
+        // ---- Thin live progress bar ----
+        Spacer(modifier = Modifier.height(6.dp))
+        ProgressBar(fraction = fraction)
     }
 }
 
@@ -340,88 +357,57 @@ private fun CompactAudioCard(
     fraction: Float,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(14.dp)
-    Surface(
-        shape = shape,
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-        ),
-        modifier = modifier
-            .width(300.dp)
-            .clip(shape)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            // ---- Header: service glyph, label, pause/play, close ----
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
-                ) {
-                    Icon(
-                        imageVector = service?.icon ?: RibbonIcons.MediaPlay,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(
-                    text = service?.label ?: "Media",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MediaAccent,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                PlayPauseButton(
-                    playing = playing,
-                    onToggle = { MediaPlayerController.togglePlayPause() },
-                    modifier = Modifier.size(30.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                StopButton(
-                    onStop = { MediaPlayerController.stop() },
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            // ---- Title ----
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = title ?: "Now playing",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+    PlayerCard(
+        service = service,
+        width = 300.dp,
+        modifier = modifier,
+        controls = {
+            PlayPauseButton(
+                playing = playing,
+                onToggle = { MediaPlayerController.togglePlayPause() },
+                modifier = Modifier.size(30.dp)
             )
-
-            // ---- Thin live progress bar ----
-            Spacer(modifier = Modifier.height(6.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            ) {
-                Box(
-                    // A minimum sliver keeps the bar visible the instant
-                    // playback starts (fraction is 0 until the first event).
-                    modifier = Modifier
-                        .fillMaxWidth(fraction.coerceIn(0.02f, 1f))
-                        .fillMaxHeight()
-                        .background(MediaAccent)
-                )
-            }
+            Spacer(modifier = Modifier.width(6.dp))
+            StopButton(
+                onStop = { MediaPlayerController.stop() },
+                modifier = Modifier.size(24.dp)
+            )
         }
+    ) {
+        // ---- Title ----
+        Text(
+            text = title ?: "Now playing",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        // ---- Thin live progress bar ----
+        Spacer(modifier = Modifier.height(6.dp))
+        ProgressBar(fraction = fraction)
+    }
+}
+
+
+/** The thin live progress bar shared by the video and audio cards. */
+@Composable
+private fun ProgressBar(fraction: Float) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(3.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    ) {
+        Box(
+            // A minimum sliver keeps the bar visible the instant playback
+            // starts (fraction is 0 until the first event).
+            modifier = Modifier
+                .fillMaxWidth(fraction.coerceIn(0.02f, 1f))
+                .fillMaxHeight()
+                .background(MediaAccent)
+        )
     }
 }

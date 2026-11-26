@@ -141,6 +141,10 @@ private const val AUTO_SAVE_IDLE_MS = 1500L
 // hover (single-verse references always show exactly that verse).
 private const val HOVER_PREVIEW_VERSES = 3
 
+// Cap for a ranged reference's hover preview: the full range is shown
+// (the card allows 12 wrapped lines) up to this many verses.
+private const val HOVER_PREVIEW_RANGE_VERSES = 12
+
 // Editor zoom range — sourced from SettingsManager so the footer slider,
 // setFontScale and the persisted clamp all share one definition.
 internal val ZOOM_MIN = SettingsManager.MIN_FONT_SCALE
@@ -224,7 +228,7 @@ fun NotesScreen(
      */
     pendingScrollLine: Int? = null,
     onScrollLineConsumed: () -> Unit = {},
-    onOpenBibleReference: (book: String, chapter: Int?, verse: Int?) -> Unit = { _, _, _ -> },
+    onOpenBibleReference: (BibleReferenceSelection) -> Unit = {},
     onHoverBibleReference: (BibleReferenceSelection?) -> Unit = { _ -> },
     /**
      * Reports which note is currently open in the editor, whenever that
@@ -287,6 +291,9 @@ fun NotesScreen(
     // extended reference chip (`$Book$C$V-7`) is open. Holds the
     // reference, the resolved verse list and the chip's window anchor.
     var versePicker by remember { mutableStateOf<VersePickerState?>(null) }
+    // Right-click "Export reference" seed: the verses of the reference's
+    // range, or null while the export dialog is closed.
+    var referenceExport by remember { mutableStateOf<VerseExportSeed?>(null) }
     // Reference hover preview: the reference under the pointer plus the
     // pointer's window anchor, and its resolved verse text.
     var verseHover by remember { mutableStateOf<VerseHoverState?>(null) }
@@ -619,6 +626,78 @@ fun NotesScreen(
         onScrollReferenceConsumed()
     }
 
+    /**
+     * Builds the export dialog's seed for a reference chip: every verse
+     * the reference covers (all chapters of a cross-chapter range), with
+     * range editing left to the dialog when it stays inside one chapter.
+     */
+    fun buildReferenceExportSeed(match: ReferenceMatch): VerseExportSeed? {
+        val book = runCatching { BibleRepository.getBook(match.book) }.getOrNull()
+            ?: return null
+        val startChapter = match.chapter ?: return null
+        val startVerse = match.verse
+        // Chapter-level chip (`$John&3`): offer the whole chapter.
+        if (startVerse == null) {
+            val chapter = book.chapters.firstOrNull { it.chapter == startChapter }
+                ?: return null
+            val cards = chapter.verses.map {
+                CardVerse(startChapter, it.verse, it.text)
+            }
+            if (cards.isEmpty()) return null
+            return VerseExportSeed(
+                bookName = book.name,
+                chapter = startChapter,
+                verses = cards
+            )
+        }
+        val endChapter = match.endChapter ?: startChapter
+        val endVerse = match.endVerse ?: startVerse
+        // Same-chapter reference: offer the WHOLE chapter as the pool, so
+        // the dialog can widen the range beyond the note's own span. The
+        // initial selection stays exactly the reference's range.
+        if (startChapter == endChapter) {
+            val chapter = book.chapters.firstOrNull { it.chapter == startChapter }
+                ?: return null
+            val cards = chapter.verses.map {
+                CardVerse(startChapter, it.verse, it.text)
+            }
+            if (cards.isEmpty()) return null
+            val startIndex = cards.indexOfFirst { it.verse == startVerse }
+                .coerceAtLeast(0)
+            val endIndex = cards.indexOfFirst { it.verse == endVerse }
+                .coerceAtLeast(startIndex)
+            return VerseExportSeed(
+                bookName = book.name,
+                chapter = startChapter,
+                verses = cards,
+                startIndex = startIndex,
+                endIndex = endIndex.coerceAtMost(cards.lastIndex)
+            )
+        }
+        // Cross-chapter range: export exactly the covered verses.
+        val cards = mutableListOf<CardVerse>()
+        for (chapterNumber in startChapter..endChapter) {
+            val chapter = book.chapters.firstOrNull { it.chapter == chapterNumber }
+                ?: continue
+            chapter.verses.forEach { verse ->
+                val inRange = when {
+                    chapterNumber == startChapter -> verse.verse >= startVerse
+                    chapterNumber == endChapter -> verse.verse <= endVerse
+                    else -> true
+                }
+                if (inRange) {
+                    cards.add(CardVerse(chapterNumber, verse.verse, verse.text))
+                }
+            }
+        }
+        if (cards.isEmpty()) return null
+        return VerseExportSeed(
+            bookName = book.name,
+            chapter = null,
+            verses = cards
+        )
+    }
+
     fun applyEditorChange(newValue: TextFieldValue) {
         val resolved = if (autoContinueLists) {
             continueListAtEnter(editorValue, newValue)
@@ -692,10 +771,21 @@ fun NotesScreen(
      *
      * Same null guard rationale as [doSave].
      */
+    // Chip colours as the editor shows them: references / media in the
+    // theme's primary, `[[note links]]` in its tertiary. Captured here
+    // because the exporter is called from an event handler.
+    val pdfPrimaryColor = MaterialTheme.colorScheme.primary
+    val pdfNoteLinkColor = MaterialTheme.colorScheme.tertiary
+
     fun doExport() {
         SoundManager.play(SoundEvent.Click)
         val note = selectedNote ?: return
-        val path = NotePdfExporter.exportAsPdf(note, editorValue.text)
+        val path = NotePdfExporter.exportAsPdf(
+            note,
+            editorValue.text,
+            primaryColor = pdfPrimaryColor,
+            noteLinkColor = pdfNoteLinkColor
+        )
         if (path != null) saveBanner = "PDF saved to $path"
     }
 
@@ -1645,9 +1735,13 @@ fun NotesScreen(
                                             versePicker = buildVersePicker(match, anchor)
                                         } else {
                                             onOpenBibleReference(
-                                                match.book,
-                                                match.chapter,
-                                                match.verse
+                                                BibleReferenceSelection(
+                                                    book = match.book,
+                                                    chapter = match.chapter,
+                                                    verse = match.verse,
+                                                    endChapter = match.endChapter,
+                                                    endVerse = match.endVerse
+                                                )
                                             )
                                         }
                                     }
@@ -1723,6 +1817,27 @@ fun NotesScreen(
                                 applyEditorChange(
                                     editorValue.copy(selection = TextRange(start, end))
                                 )
+                            },
+                            // Right-click on plain text: the Word-style
+                            // edit menu (Cut / Copy / Paste / Select all)
+                            // plus Insert Bible reference.
+                            onCutSelection = { cutSelection() },
+                            onCopySelection = { copySelection() },
+                            onPasteClipboard = { pasteClipboard() },
+                            onSelectAllText = { selectAllText() },
+                            onInsertReference = {
+                                referencePickerKind = ReferenceKind.VERSE
+                            },
+                            // Right-click on a reference chip: export the
+                            // range it covers as a postcard / deck.
+                            onExportReference = { match ->
+                                val seed = buildReferenceExportSeed(match)
+                                if (seed != null) {
+                                    referenceExport = seed
+                                } else {
+                                    saveBanner =
+                                        "Could not resolve ${match.displayText()}."
+                                }
                             },
                             onShortcut = { event ->
                                 // While the inline reference-autocomplete
@@ -1939,10 +2054,7 @@ fun NotesScreen(
                             onFontScaleCommit = { commitFontScale() },
                             onEditorValueChange = { applyEditorChange(it) },
                             onUndo = { undo() },
-                            onRedo = { redo() },
-                            onToggleOrientation = {
-                                applyEditorChange(toggleLineOrientation(editorValue))
-                            }
+                            onRedo = { redo() }
                         )
 
                         // Rich media cards: every `@youtube:…` / `@spotify:…` /
@@ -2241,9 +2353,11 @@ fun NotesScreen(
                                             SoundManager.play(SoundEvent.Click)
                                             versePicker = null
                                             onOpenBibleReference(
-                                                picker.match.book,
-                                                entryChapter,
-                                                entryVerse
+                                                BibleReferenceSelection(
+                                                    book = picker.match.book,
+                                                    chapter = entryChapter,
+                                                    verse = entryVerse
+                                                )
                                             )
                                         }
                                 ) {
@@ -2262,6 +2376,15 @@ fun NotesScreen(
                         }
                     }
                 }
+            }
+
+            // Right-click "Export reference": the shared card dialog for
+            // the reference's verse range.
+            referenceExport?.let { seed ->
+                VerseExportDialog(
+                    seed = seed,
+                    onDismiss = { referenceExport = null }
+                )
             }
         }
 }
@@ -2906,7 +3029,10 @@ private data class VerseHoverState(
 )
 
 
-/** Short human label for a reference, e.g. `John 3:16` / `John 3` / `John`. */
+/**
+ * Short human label for a reference, e.g. `John 3:16`, `John 3:16-18`,
+ * `Luke 7:1-8:1`, `John 3` or `John`.
+ */
 private fun referenceLabel(selection: BibleReferenceSelection): String = buildString {
     append(selection.book)
     selection.chapter?.let { chapter ->
@@ -2916,6 +3042,16 @@ private fun referenceLabel(selection: BibleReferenceSelection): String = buildSt
     selection.verse?.let { verse ->
         append(':')
         append(verse)
+        selection.endVerse?.let { end ->
+            append('-')
+            selection.endChapter
+                ?.takeIf { it != selection.chapter }
+                ?.let { endChapter ->
+                    append(endChapter)
+                    append(':')
+                }
+            append(end)
+        }
     }
 }
 
@@ -2934,17 +3070,42 @@ private suspend fun loadVerseHoverPreview(selection: BibleReferenceSelection): S
         ?: BibleCatalog.nameToBookNumber[selection.book.trim().lowercase()]
             ?.let { number -> books.firstOrNull { it.book == number } }
         ?: return null
-    val chapter = book.chapters.firstOrNull { it.chapter == chapterNumber } ?: return null
+    val startChapter = book.chapters.firstOrNull { it.chapter == chapterNumber }
+        ?: return null
     val verseNumber = selection.verse
-    val verses = if (verseNumber != null) {
-        chapter.verses.filter { it.verse == verseNumber }
-    } else {
-        chapter.verses.take(HOVER_PREVIEW_VERSES)
+    if (verseNumber == null) {
+        // Chapter / book-level reference: preview its opening verses.
+        return startChapter.verses.take(HOVER_PREVIEW_VERSES)
+            .joinToString("\n") { verse ->
+                "${verse.verse}. ${stripWordStudyMarkup(verse.text).trim()}"
+            }
+            .ifBlank { null }
     }
-    if (verses.isEmpty()) return null
-    return verses.joinToString("\n") { verse ->
-        "${verse.verse}. ${stripWordStudyMarkup(verse.text).trim()}"
+
+    // A ranged reference previews every verse it covers (up to a cap so a
+    // 40-verse span doesn't fill the screen) across chapter boundaries.
+    val endChapter = (selection.endChapter ?: chapterNumber)
+        .coerceAtLeast(chapterNumber)
+    val endVerse = selection.endVerse ?: verseNumber
+    val lines = mutableListOf<String>()
+    for (chapterIndex in chapterNumber..endChapter) {
+        if (lines.size >= HOVER_PREVIEW_RANGE_VERSES) break
+        val chapter = book.chapters.firstOrNull { it.chapter == chapterIndex }
+            ?: continue
+        chapter.verses.forEach { verse ->
+            if (lines.size >= HOVER_PREVIEW_RANGE_VERSES) return@forEach
+            val inRange = when {
+                chapterNumber == endChapter -> verse.verse in verseNumber..endVerse
+                chapterIndex == chapterNumber -> verse.verse >= verseNumber
+                chapterIndex == endChapter -> verse.verse <= endVerse
+                else -> true
+            }
+            if (inRange) {
+                lines.add("${verse.verse}. ${stripWordStudyMarkup(verse.text).trim()}")
+            }
+        }
     }
+    return lines.joinToString("\n").ifBlank { null }
 }
 
 

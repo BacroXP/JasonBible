@@ -25,12 +25,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,13 +50,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import data.AppRelease
+import data.AppUpdater
 import data.BibleRepository
 import data.ReadingStatistics
 import data.SoundEvent
 import data.SoundManager
+import data.openExternalUrl
 import java.time.LocalDate
 import java.util.Random
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import model.Book
 
 
@@ -101,12 +107,21 @@ private data class StudyProgress(
     val wholeBible: Int
 )
 
-private val MenuNavy = Color(0xFF0B1B3A)
-private val MenuPanel = Color(0xFF13294D)
-private val MenuGold = Color(0xFFF2C14E)
-private val MenuCream = Color(0xFFF7F1E3)
-private val MenuMuted = Color(0xFFB9C2D8)
-private val MenuRing = Color(0xFF243A68)
+// The menu draws from the same Pages palette as Settings (AppTheme): ink
+// background, navy panel surfaces, leather gold accents and cream text, so
+// nothing on this screen is hand-picked any more.
+private val MenuBackground: Color
+    @Composable get() = MaterialTheme.colorScheme.background
+private val MenuSurface: Color
+    @Composable get() = MaterialTheme.colorScheme.surface
+private val MenuGold: Color
+    @Composable get() = MaterialTheme.colorScheme.primary
+private val MenuCream: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurface
+private val MenuMuted: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+private val MenuLine: Color
+    @Composable get() = MaterialTheme.colorScheme.outlineVariant
 
 
 @Composable
@@ -122,12 +137,26 @@ fun HomeScreen(
     var dailyVerseLoaded by remember { mutableStateOf(false) }
     var books by remember { mutableStateOf<List<Book>>(emptyList()) }
     var revealed by remember { mutableStateOf(false) }
+    // Newer stable release from GitHub (null = up to date / offline), and
+    // whether its installer is currently being fetched and staged.
+    var update by remember { mutableStateOf<AppRelease?>(null) }
+    var updating by remember { mutableStateOf(false) }
+    // Download percentage while [updating]; -1 until the server reports a
+    // size (or when it reports none at all).
+    var updateProgress by remember { mutableStateOf(-1) }
+    val scope = rememberCoroutineScope()
     val reveal by animateFloatAsState(
         targetValue = if (revealed) 1f else 0f,
         animationSpec = tween(durationMillis = 550),
         label = "home-reveal"
     )
     LaunchedEffect(Unit) { revealed = true }
+
+    // One check per app launch (AppUpdater caches it session-wide), so
+    // returning to Home never re-hits the GitHub API.
+    LaunchedEffect(Unit) {
+        update = AppUpdater.checkForUpdate()
+    }
 
     LaunchedEffect(BibleRepository.currentModuleId(), todaySeed) {
         val loaded = BibleRepository.loadBooks()
@@ -137,8 +166,8 @@ fun HomeScreen(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(MenuNavy),
-        contentAlignment = Alignment.TopCenter
+        modifier = Modifier.fillMaxSize().background(MenuBackground),
+        contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier
@@ -159,7 +188,7 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
             Text(
                 text = "HOLY BIBLE",
-                color = MenuGold,
+                color = MenuCream,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold,
                 fontSize = 36.sp,
@@ -230,13 +259,47 @@ fun HomeScreen(
             Spacer(Modifier.height(6.dp))
         }
 
-        Text(
-            text = "v2.2.1",
-            color = MenuMuted.copy(alpha = 0.55f),
-            fontSize = 10.sp,
-            letterSpacing = 1.sp,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp)
-        )
+        Row(
+            modifier = Modifier.align(Alignment.BottomStart).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "v${AppUpdater.CURRENT_VERSION}",
+                color = MenuMuted.copy(alpha = 0.55f),
+                fontSize = 10.sp,
+                letterSpacing = 1.sp
+            )
+            update?.let { release ->
+                Spacer(Modifier.width(10.dp))
+                UpdateChip(
+                    version = release.version,
+                    busy = updating,
+                    progress = updateProgress,
+                    onClick = {
+                        if (updating) return@UpdateChip
+                        updating = true
+                        updateProgress = -1
+                        scope.launch {
+                            val installed = AppUpdater.installAndRestart(release) { percent ->
+                                updateProgress = percent
+                            }
+                            if (installed) {
+                                // The staged script waits for this process
+                                // to exit, installs, then relaunches it.
+                                openQuit()
+                            } else {
+                                // No staged installer (dev build, missing
+                                // asset, download failed): let the user
+                                // grab it from the release page.
+                                updating = false
+                                update = null
+                                openExternalUrl(release.pageUrl)
+                            }
+                        }
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -268,8 +331,8 @@ private fun DailyVerseCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(MenuPanel.copy(alpha = 0.72f))
-            .border(1.dp, MenuGold.copy(alpha = 0.8f), shape)
+            .background(MenuSurface.copy(alpha = 0.72f))
+            .border(1.dp, MenuLine.copy(alpha = 0.6f), shape)
             .padding(horizontal = 22.dp, vertical = 22.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -351,8 +414,16 @@ private fun HomeMenuButton(
 ) {
     val shape = RoundedCornerShape(12.dp)
     val background = if (filled) MenuGold else Color.Transparent
-    val contentColor = if (filled) MenuNavy else MenuGold
-    val borderColor = if (filled) Color.Transparent else MenuGold.copy(alpha = 0.75f)
+    val contentColor = if (filled) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MenuGold
+    }
+    val borderColor = if (filled) {
+        Color.Transparent
+    } else {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f)
+    }
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val scale by animateFloatAsState(
@@ -401,7 +472,54 @@ private fun HomeMenuButton(
 
 
 @Composable
+private fun UpdateChip(
+    version: String,
+    busy: Boolean,
+    progress: Int,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(4.dp)
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .background(
+                if (hovered && !busy) MenuGold.copy(alpha = 0.16f)
+                else Color.Transparent
+            )
+            .border(
+                1.dp,
+                MenuGold.copy(alpha = if (busy) 0.35f else 0.7f),
+                shape
+            )
+            .hoverable(interaction)
+            .clickable(enabled = !busy) {
+                SoundManager.play(SoundEvent.Click)
+                onClick()
+            }
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = when {
+                !busy -> "UPDATE $version"
+                progress >= 0 -> "UPDATING $progress%"
+                else -> "UPDATING\u2026"
+            },
+            color = MenuGold.copy(alpha = if (busy) 0.6f else 1f),
+            fontSize = 10.sp,
+            letterSpacing = 1.5.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+
+@Composable
 private fun ProgressRing(percent: Int, label: String, modifier: Modifier = Modifier) {
+    val ringColor = MenuLine
+    val progressColor = MenuGold
     val animatedProgress by animateFloatAsState(
         targetValue = percent / 100f,
         animationSpec = tween(durationMillis = 700),
@@ -418,7 +536,7 @@ private fun ProgressRing(percent: Int, label: String, modifier: Modifier = Modif
             Canvas(Modifier.fillMaxSize()) {
                 val stroke = 6.dp.toPx()
                 drawArc(
-                    color = MenuRing,
+                    color = ringColor,
                     startAngle = -90f,
                     sweepAngle = 360f,
                     useCenter = false,
@@ -426,7 +544,7 @@ private fun ProgressRing(percent: Int, label: String, modifier: Modifier = Modif
                 )
                 if (animatedProgress > 0f) {
                     drawArc(
-                        color = MenuGold,
+                        color = progressColor,
                         startAngle = -90f,
                         sweepAngle = 360f * animatedProgress,
                         useCenter = false,

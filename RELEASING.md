@@ -50,7 +50,7 @@ Run these locally before tagging anything:
 ./gradlew packageDeb
 
 # 3. Optional smoke test of the freshly built package
-sudo apt install ./build/compose/binaries/main/deb/bibleapp_2.2.1_amd64.deb
+sudo apt install ./build/compose/binaries/main/deb/bibleapp_2.3.0_amd64.deb
 ```
 
 ## Step 1 — Set the version (only when versioning)
@@ -58,10 +58,15 @@ sudo apt install ./build/compose/binaries/main/deb/bibleapp_2.2.1_amd64.deb
 The version lives in [`build.gradle.kts`](build.gradle.kts):
 
 ```kotlin
-packageVersion = "2.2.1"
+packageVersion = "2.3.0"
 ```
 
-The **git tag must match** (`v` + packageVersion): `2.2.1` → tag `v2.2.1`.
+The same number is repeated in `AppUpdater.CURRENT_VERSION`
+(`src/desktopMain/kotlin/data/AppUpdater.kt`) — that constant is what the
+in-app update check compares against and what the main menu shows, so bump
+both together.
+
+The **git tag must match** (`v` + packageVersion): `2.3.0` → tag `v2.3.0`.
 
 ## Step 2 — Commit everything and push
 

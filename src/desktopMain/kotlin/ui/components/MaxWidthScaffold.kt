@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +64,11 @@ fun MaxWidthScaffold(
         contentAlignment = if (compact) Alignment.TopStart else Alignment.Center
     ) {
         Card(
+            // Explicitly the page surface: a bare Card would take the M3
+            // container tone, which is not part of the Pages palette.
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
             modifier = if (compact) {
                 Modifier.fillMaxSize()
             } else {

@@ -270,8 +270,8 @@ fun Navigation(
                     onScrollReferenceConsumed = { pendingNoteScrollTarget = null },
                     pendingScrollLine = pendingScrollLine,
                     onScrollLineConsumed = { pendingScrollLine = null },
-                    onOpenBibleReference = { book, chapter, verse ->
-                        openBible(BibleReferenceSelection(book, chapter, verse))
+                    onOpenBibleReference = { reference ->
+                        openBible(reference)
                     },
                     onSelectedNoteChange = { selectedNoteFileName = it },
                     // Dialogs (separate windows) forward Ctrl+F here.
@@ -473,8 +473,8 @@ fun Navigation(
                                     onScrollReferenceConsumed = { pendingNoteScrollTarget = null },
                                     pendingScrollLine = pendingScrollLine,
                                     onScrollLineConsumed = { pendingScrollLine = null },
-                                    onOpenBibleReference = { book, chapter, verse ->
-                                        openBible(BibleReferenceSelection(book, chapter, verse))
+                                    onOpenBibleReference = { reference ->
+                                        openBible(reference)
                                     },
                                     onHoverBibleReference = { ref ->
                                         hoveredBibleReference = ref

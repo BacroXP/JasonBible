@@ -60,76 +60,86 @@ internal fun EditorHeader(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            BibleEyebrow("NOTE")
             Text(
                 text = note.title.ifBlank { note.fileName },
-                style = MaterialTheme.typography.titleLarge
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = note.fileName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
+        // The header keeps icon actions only — the labelled buttons that
+        // used to crowd this row were duplicates of ribbon / shortcut
+        // actions. Tooltips carry the shortcut hints.
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             if (onRename != null) {
                 ToolbarTip(label = "Rename note (keeps the first line)") {
-                    Button(onClick = onRename) {
-                        Icon(
-                            RibbonIcons.Edit,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text("Rename", modifier = Modifier.padding(start = 6.dp))
-                    }
+                    ChromeIconButton(
+                        icon = RibbonIcons.Edit,
+                        description = "Rename note",
+                        onClick = onRename
+                    )
                 }
             }
             if (onBack != null) {
                 ToolbarTip(label = "Back to previous screen", shortcut = "Ctrl+W") {
-                    Button(onClick = onBack) {
-                        Icon(RibbonIcons.Back, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text("Back", modifier = Modifier.padding(start = 6.dp))
-                    }
+                    ChromeIconButton(
+                        icon = RibbonIcons.Back,
+                        description = "Back",
+                        onClick = onBack
+                    )
                 }
             }
             ToolbarTip(label = "Export note as PDF", shortcut = "Ctrl+P") {
-                Button(onClick = onExport) {
-                    Icon(RibbonIcons.Export, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text("Export", modifier = Modifier.padding(start = 6.dp))
-                }
+                ChromeIconButton(
+                    icon = RibbonIcons.Export,
+                    description = "Export note as PDF",
+                    onClick = onExport
+                )
             }
             ToolbarTip(label = "Save note", shortcut = "Ctrl+S") {
-                Button(onClick = onSave) {
-                    Icon(RibbonIcons.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text(if (saving) "Saving..." else "Save", modifier = Modifier.padding(start = 6.dp))
-                }
+                ChromeIconButton(
+                    icon = RibbonIcons.Save,
+                    description = if (saving) "Saving" else "Save note",
+                    active = saving,
+                    onClick = onSave
+                )
             }
             if (onNew != null) {
                 ToolbarTip(label = "Create a new note") {
-                    Button(onClick = onNew) {
-                        Icon(RibbonIcons.New, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text("New", modifier = Modifier.padding(start = 6.dp))
-                    }
+                    ChromeIconButton(
+                        icon = RibbonIcons.New,
+                        description = "New note",
+                        onClick = onNew
+                    )
                 }
             }
             if (onDelete != null) {
                 ToolbarTip(label = "Delete note") {
-                    Button(
-                        onClick = onDelete,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError
-                        )
-                    ) {
-                        Icon(RibbonIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text("Delete", modifier = Modifier.padding(start = 6.dp))
-                    }
+                    ChromeIconButton(
+                        icon = RibbonIcons.Delete,
+                        description = "Delete note",
+                        danger = true,
+                        onClick = onDelete
+                    )
                 }
             }
         }
@@ -147,8 +157,7 @@ internal fun EditorFooter(
     onFontScaleCommit: () -> Unit,
     onEditorValueChange: (TextFieldValue) -> Unit,
     onUndo: () -> Unit,
-    onRedo: () -> Unit,
-    onToggleOrientation: () -> Unit
+    onRedo: () -> Unit
 ) {
     val onSurface = MaterialTheme.colorScheme.onSurfaceVariant
     val stats = remember(value.text) { computeTextStats(value.text) }
@@ -204,12 +213,6 @@ internal fun EditorFooter(
                     style = MaterialTheme.typography.labelLarge
                 )
             }
-            Text(
-                text = "LTR\u21C4RTL",
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.clickable { onToggleOrientation() }
-            )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -300,7 +303,7 @@ internal fun NoteFileCard(
     Card(
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
+            containerColor = if (selected) activeChromeFill()
             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
         ),
         modifier = Modifier

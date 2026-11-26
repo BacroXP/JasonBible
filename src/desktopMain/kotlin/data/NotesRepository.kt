@@ -24,11 +24,26 @@ import ui.stripLeadingMarkers
 
 object NotesRepository {
 
-    private val notesDir: Path = Path.of(
+    /** Where notes live until the user picks another folder. */
+    val defaultFolder: Path = Path.of(
         System.getProperty("user.home"),
         ".bibleapp",
         "notes"
     )
+
+    /**
+     * The folder notes are read from and written to right now: the one
+     * picked in Settings → Notes, or [defaultFolder]. Resolved on every
+     * access (a cheap Path build) so a folder switch takes effect
+     * immediately, without restarting the app.
+     */
+    private val notesDir: Path
+        get() {
+            val configured = SettingsManager.notesFolder
+            if (configured.isBlank()) return defaultFolder
+            return runCatching { Path.of(configured).toAbsolutePath().normalize() }
+                .getOrElse { defaultFolder }
+        }
 
     // Verse-scoped lookups (notesForVerse / referencesForVerse / …) read
     // this cached list. Unlike the lazy `val` it used to be, the cache is
@@ -325,6 +340,88 @@ object NotesRepository {
     // Imported media files (`@file:` references)
     // ------------------------------------------------------------------
 
+    /** The folder every note is stored in (shown in Settings). */
+    fun notesFolder(): Path = notesDir
+
+    /**
+     * Outcome of switching the notes folder: [folder] is the folder now in
+     * use, [skipped] counts entries left behind because the target already
+     * held a note / folder of the same name (never overwritten).
+     */
+    data class MoveResult(
+        val folder: Path,
+        val skipped: Int,
+        val ok: Boolean,
+        val error: String? = null
+    )
+
+    /**
+     * Switches the notes library to [target] and MOVES the existing notes
+     * there — notes, subfolders and the `media` folder — keeping every
+     * relative name, so `[[links]]`, custom display names and media
+     * references keep resolving. Entries whose name already exists in
+     * [target] stay where they are and are reported in
+     * [MoveResult.skipped].
+     */
+    fun migrateTo(target: Path): MoveResult {
+        val destination = runCatching { target.toAbsolutePath().normalize() }
+            .getOrElse { error ->
+                return MoveResult(
+                    folder = notesDir,
+                    skipped = 0,
+                    ok = false,
+                    error = error.message ?: "Invalid folder"
+                )
+            }
+        val source = notesDir
+        return runCatching {
+            Files.createDirectories(destination)
+            var skipped = 0
+            if (source != destination && Files.isDirectory(source)) {
+                Files.list(source).use { entries ->
+                    entries.toList().forEach { entry ->
+                        skipped += moveEntry(entry, destination.resolve(entry.fileName.toString()))
+                    }
+                }
+            }
+            // The setting is written only after the files are in place, so
+            // a failed move can never point the app at an empty library.
+            SettingsManager.notesFolder = destination.toString()
+            invalidateNotes()
+            MoveResult(destination, skipped, ok = true)
+        }.getOrElse { error ->
+            MoveResult(
+                folder = source,
+                skipped = 0,
+                ok = false,
+                error = error.message ?: "Move failed"
+            )
+        }
+    }
+
+    /** Moves [source] into [target]; returns how many entries stayed behind. */
+    private fun moveEntry(source: Path, target: Path): Int {
+        if (!Files.exists(target)) {
+            return runCatching {
+                Files.move(source, target)
+                0
+            }.getOrDefault(1)
+        }
+        // Never overwrite an existing note / file: leave the source alone.
+        if (!Files.isDirectory(source) || !Files.isDirectory(target)) return 1
+
+        var skipped = 0
+        Files.list(source).use { entries ->
+            entries.toList().forEach { entry ->
+                skipped += moveEntry(entry, target.resolve(entry.fileName.toString()))
+            }
+        }
+        // Deletes the source folder only when it is now empty (a folder
+        // holding skipped entries must stay).
+        runCatching { Files.delete(source) }
+        return skipped
+    }
+
     /** The subfolder holding media files imported into notes. */
     fun mediaDir(): Path = notesDir.resolve("media")
 
@@ -474,9 +571,22 @@ object NotesRepository {
      */
     private fun matchesVerse(ref: NoteReference, targetNumber: Int, chapter: Int, verse: Int): Boolean {
         val refNumber = BibleRepository.bookNumberFor(ref.book)
-        return refNumber != null && refNumber == targetNumber &&
-            ref.chapter == chapter &&
-            ref.verse == verse
+        if (refNumber == null || refNumber != targetNumber) return false
+        // Range-aware: `$John&3&16-&18` (or an inline `-18` token) covers
+        // every verse of its span, so the note's chip appears on all of
+        // them instead of only on the start verse.
+        val startChapter = ref.chapter
+        val startVerse = ref.verse
+        val endChapter = ref.endChapter ?: startChapter
+        val endVerse = ref.endVerse ?: startVerse
+        if (chapter < startChapter || chapter > endChapter) return false
+        return when {
+            chapter == startChapter && chapter == endChapter ->
+                verse >= startVerse && verse <= endVerse
+            chapter == startChapter -> verse >= startVerse
+            chapter == endChapter -> verse <= endVerse
+            else -> true
+        }
     }
 
     fun referencesForVerse(bookName: String, chapter: Int, verse: Int): List<NoteReference> {
@@ -615,7 +725,9 @@ object NotesRepository {
                                         noteTitle = title,
                                         book = token.book.trim(),
                                         chapter = token.chapter,
-                                        verse = token.verse
+                                        verse = token.verse,
+                                        endChapter = token.endChapter,
+                                        endVerse = token.endVerse
                                     )
                                 )
                             }
@@ -648,7 +760,9 @@ object NotesRepository {
                                     noteTitle = title,
                                     book = token.book.trim(),
                                     chapter = token.chapter,
-                                    verse = token.verse
+                                    verse = token.verse,
+                                    endChapter = token.endChapter,
+                                    endVerse = token.endVerse
                                 )
                             )
                         }
@@ -692,9 +806,11 @@ object NotesRepository {
         val book = match.groupValues[1].trim()
         val chapter = match.groupValues[2].toIntOrNull()
         val verse = match.groupValues[3].toIntOrNull()
-        // Group 5 is the trailing label — group 4 is the optional
-        // verse-range suffix, which the note model doesn't track.
+        // Group 5 is the trailing label; group 4 is the optional
+        // verse-range suffix (`+`, `-V2`, `-&C2&V2`, …). Resolve it so the
+        // note model knows every verse the reference covers.
         val extra = match.groupValues[5].trim().ifBlank { null }
+        val range = parseRange(chapter, verse, match.groupValues[4])
 
         return when {
             chapter != null && verse != null -> {
@@ -703,7 +819,9 @@ object NotesRepository {
                     book = book,
                     chapter = chapter,
                     verse = verse,
-                    label = extra
+                    label = extra,
+                    endChapter = range?.endChapter,
+                    endVerse = range?.endVerse
                 )
 
                 ReferenceParseResult(

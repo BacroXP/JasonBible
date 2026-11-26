@@ -2,10 +2,12 @@ package ui
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -19,21 +21,21 @@ import kotlin.math.min
 // ---------------------------------------------------------------------------
 // App color styles
 //
-// The app supports four selectable color styles (Settings → Appearance):
-//   NORMAL     — the stock Material 3 baseline scheme (what the app shipped
-//                with; purple-toned in light, lavender in dark).
-//   SATURATED  — the same hue family pushed to high chroma so the UI reads
-//                noticeably more vivid than the muted M3 baseline.
-//   GRAY       — a neutral monochrome palette (zero saturation), for a
-//                subdued, paper-like look.
-//   CUSTOM     — a tonal palette derived from a user-picked seed color,
-//                exposed as a row of accent swatches in Settings.
+// The app supports four selectable color styles (Settings → Appearance).
+// Every style is built from the Pages palette, so the navy + gold identity
+// survives the choice:
+//   NORMAL     — the Pages palette exactly as designed.
+//   SATURATED  — the same palette with the accent family pushed to high
+//                chroma and the panels tinted a deeper blue.
+//   GRAY       — the palette stripped of saturation, a monochrome
+//                paper / night look.
+//   CUSTOM     — the Pages surfaces with the accent family re-hued from the
+//                user-picked seed color (the swatch row in Settings).
 //
-// Desktop Compose has no dynamicColorScheme() (Android-only), so the
-// derived styles build the full M3 ColorScheme by hand: the seed color is
-// converted to HSL and the ~24 key roles are computed as tones along that
-// hue (with a 30° tertiary shift), leaving the neutral surface/error
-// families at their baseline values.
+// A style is applied by transforming the base scheme's roles in HSL (hue /
+// saturation held, lightness kept), never by deriving a whole scheme from
+// scratch: that keeps the navy panels, cream text and the full container
+// family intact, so no style can reintroduce the grey-panel look.
 // ---------------------------------------------------------------------------
 
 /** The four selectable color styles, keyed by the persisted string. */
@@ -96,21 +98,42 @@ internal fun pagesScheme(dark: Boolean): ColorScheme = if (dark) {
         onPrimaryContainer = PagesGoldSoft,
         secondary = PagesGoldSoft,
         onSecondary = PagesNavy,
+        secondaryContainer = PagesActiveNavy,
+        onSecondaryContainer = PagesGoldSoft,
         tertiary = PagesGold,
         onTertiary = PagesNavy,
+        tertiaryContainer = PagesActiveNavy,
+        onTertiaryContainer = PagesGoldSoft,
         background = PagesInk,
         onBackground = PagesCream,
         surface = PagesPanel,
         onSurface = PagesCream,
         surfaceVariant = PagesPanel2,
         onSurfaceVariant = PagesMuted,
-        surfaceTint = PagesGold,
+        // Tint elevated surfaces with navy rather than gold: gold at a low
+        // elevation alpha over navy averages to a neutral grey-brown, which
+        // is what made every tonalElevation Surface look grey.
+        surfaceTint = Color(0xFF1B2B47),
+        // The container family must be filled in by hand: leaving these at
+        // the M3 baseline is what made every default Card / menu / dialog a
+        // grey-purple panel sitting inside the navy theme.
+        surfaceDim = Color(0xFF070C14),
+        surfaceBright = Color(0xFF1B2A44),
+        surfaceContainerLowest = PagesInk,
+        surfaceContainerLow = PagesNavy,
+        surfaceContainer = Color(0xFF0E1828),
+        surfaceContainerHigh = Color(0xFF111E31),
+        surfaceContainerHighest = Color(0xFF14243A),
+        inversePrimary = PagesGoldSoft,
         outline = PagesLine,
         outlineVariant = Color(0xFF1A2332),
         inverseSurface = PagesCream,
         inverseOnSurface = PagesNavy,
         error = Color(0xFFFFB4AB),
-        onError = Color(0xFF690005)
+        onError = Color(0xFF690005),
+        errorContainer = Color(0xFF93000A),
+        onErrorContainer = Color(0xFFFFDAD6),
+        scrim = Color(0xFF000000)
     )
 } else {
     lightColorScheme(
@@ -120,15 +143,55 @@ internal fun pagesScheme(dark: Boolean): ColorScheme = if (dark) {
         onPrimaryContainer = Color(0xFF2B1A00),
         secondary = Color(0xFF8A5A12),
         onSecondary = Color.White,
+        secondaryContainer = PagesActivePaper,
+        onSecondaryContainer = Color(0xFF2B1A00),
+        tertiary = Color(0xFF8A5A12),
+        onTertiary = Color.White,
+        tertiaryContainer = PagesActivePaper,
+        onTertiaryContainer = Color(0xFF2B1A00),
         background = PagesCream,
         onBackground = PagesNavy,
         surface = Color(0xFFFBF7EF),
         onSurface = PagesNavy,
         surfaceVariant = Color(0xFFEDE4D4),
         onSurfaceVariant = Color(0xFF5D5547),
-        outline = Color(0xFFC9BFAE)
+        surfaceDim = Color(0xFFE8DECB),
+        surfaceBright = Color(0xFFFFFBF3),
+        surfaceContainerLowest = Color(0xFFFFFDF8),
+        surfaceContainerLow = Color(0xFFFBF6EC),
+        surfaceContainer = Color(0xFFF6EFE2),
+        surfaceContainerHigh = Color(0xFFF0E7D6),
+        surfaceContainerHighest = Color(0xFFEADFCB),
+        surfaceTint = Color(0xFFE3D3B4),
+        inversePrimary = PagesGold,
+        outline = Color(0xFFC9BFAE),
+        outlineVariant = Color(0xFFDCCFBA),
+        inverseSurface = PagesNavy,
+        inverseOnSurface = PagesCream,
+        errorContainer = Color(0xFFFFDAD6),
+        onErrorContainer = Color(0xFF410002),
+        scrim = Color(0xFF000000)
     )
 }
+
+/**
+ * The plate behind an ACTIVE chrome item: a selected section in a rail, an
+ * armed jump chip, the lit icon of a toggle button. Gold at a low alpha over
+ * the navy mixes into a muddy grey, so the active state is drawn as a solid
+ * deep-blue plate instead and keeps the gold for its border and label.
+ */
+private val PagesActiveNavy = Color(0xFF16294D)
+private val PagesActivePaper = Color(0xFFF6EBD6)
+
+
+/**
+ * Fill of an active chrome item. It comes from the scheme's
+ * secondary-container role, so it follows the selected color style instead
+ * of being hardcoded navy.
+ */
+@Composable
+internal fun activeChromeFill(): Color = MaterialTheme.colorScheme.secondaryContainer
+
 
 /** Site-style typography: serif display/headings, sans body copy. */
 internal fun appTypography(): Typography {
@@ -165,14 +228,115 @@ internal val AppShapes = Shapes(
 )
 
 /**
- * Every persisted theme style now resolves to the Pages palette; the dark
- * toggle still picks the navy or cream variant.
+ * The scheme for one persisted style. The dark toggle picks the navy or
+ * cream variant of the Pages palette; [style] then selects how its accent
+ * roles (and, lightly, its panels) are colorized.
  */
 internal fun appColorScheme(
     dark: Boolean,
     style: AppColorStyle,
     customAccent: Long
-): ColorScheme = pagesScheme(dark)
+): ColorScheme {
+    val pages = pagesScheme(dark)
+    return when (style) {
+        AppColorStyle.NORMAL -> pages
+
+        // Accent roles at (near) full chroma, panels a touch bluer: the same
+        // gold-on-navy, just louder.
+        AppColorStyle.SATURATED -> pages
+            .mapAccents { it.withSaturation(it.toHsl().second * 1.25f + 0.20f) }
+            .mapSurfaces { it.withSaturation(it.toHsl().second + 0.18f) }
+
+        // Zero chroma everywhere — including errors, so the whole window
+        // reads as one material instead of grey with stray colored bits.
+        AppColorStyle.GRAY -> pages.mapAllRoles { it.withSaturation(0f) }
+
+        AppColorStyle.CUSTOM -> {
+            val seed = Color(saneAccent(customAccent))
+            val (hue, seedSaturation, _) = seed.toHsl()
+            if (seedSaturation < 0.08f) {
+                // A grey / black seed names no hue; keep the gold rather
+                // than inventing an arbitrary one.
+                pages
+            } else {
+                val accentSaturation = (seedSaturation * 0.9f).coerceIn(0.35f, 0.95f)
+                pages
+                    .mapAccents { it.withHue(hue).withSaturation(accentSaturation) }
+                    // Panels pick up just a hint of the seed, so the custom
+                    // style reads as themed rather than recolored text.
+                    .mapSurfaces {
+                        it.withHue(hue).withSaturation(it.toHsl().second * 0.45f + 0.06f)
+                    }
+            }
+        }
+    }
+}
+
+
+/** The accent roles: primary / secondary / tertiary families and their
+ *  on-colors, containers and fixed variants. */
+private fun ColorScheme.mapAccents(transform: (Color) -> Color): ColorScheme = copy(
+    primary = transform(primary),
+    onPrimary = transform(onPrimary),
+    primaryContainer = transform(primaryContainer),
+    onPrimaryContainer = transform(onPrimaryContainer),
+    inversePrimary = transform(inversePrimary),
+    primaryFixed = transform(primaryFixed),
+    primaryFixedDim = transform(primaryFixedDim),
+    onPrimaryFixed = transform(onPrimaryFixed),
+    onPrimaryFixedVariant = transform(onPrimaryFixedVariant),
+    secondary = transform(secondary),
+    onSecondary = transform(onSecondary),
+    secondaryContainer = transform(secondaryContainer),
+    onSecondaryContainer = transform(onSecondaryContainer),
+    secondaryFixed = transform(secondaryFixed),
+    secondaryFixedDim = transform(secondaryFixedDim),
+    onSecondaryFixed = transform(onSecondaryFixed),
+    onSecondaryFixedVariant = transform(onSecondaryFixedVariant),
+    tertiary = transform(tertiary),
+    onTertiary = transform(onTertiary),
+    tertiaryContainer = transform(tertiaryContainer),
+    onTertiaryContainer = transform(onTertiaryContainer),
+    tertiaryFixed = transform(tertiaryFixed),
+    tertiaryFixedDim = transform(tertiaryFixedDim),
+    onTertiaryFixed = transform(onTertiaryFixed),
+    onTertiaryFixedVariant = transform(onTertiaryFixedVariant)
+)
+
+
+/** The neutral roles: page background, the panel / container family, the
+ *  tint and the outlines. Text roles are left alone on purpose. */
+private fun ColorScheme.mapSurfaces(transform: (Color) -> Color): ColorScheme = copy(
+    background = transform(background),
+    surface = transform(surface),
+    surfaceVariant = transform(surfaceVariant),
+    surfaceDim = transform(surfaceDim),
+    surfaceBright = transform(surfaceBright),
+    surfaceContainerLowest = transform(surfaceContainerLowest),
+    surfaceContainerLow = transform(surfaceContainerLow),
+    surfaceContainer = transform(surfaceContainer),
+    surfaceContainerHigh = transform(surfaceContainerHigh),
+    surfaceContainerHighest = transform(surfaceContainerHighest),
+    surfaceTint = transform(surfaceTint),
+    outline = transform(outline),
+    outlineVariant = transform(outlineVariant),
+    inverseSurface = transform(inverseSurface)
+)
+
+
+/** Every role, accents and neutrals and the text / error roles too. */
+private fun ColorScheme.mapAllRoles(transform: (Color) -> Color): ColorScheme =
+    mapAccents(transform).mapSurfaces(transform).copy(
+        onBackground = transform(onBackground),
+        onSurface = transform(onSurface),
+        onSurfaceVariant = transform(onSurfaceVariant),
+        inverseOnSurface = transform(inverseOnSurface),
+        error = transform(error),
+        onError = transform(onError),
+        errorContainer = transform(errorContainer),
+        onErrorContainer = transform(onErrorContainer),
+        scrim = transform(scrim)
+    )
 
 
 /** The default seed used when the persisted custom accent is missing /
@@ -267,6 +431,21 @@ internal fun deriveTonalScheme(seed: Color, dark: Boolean): ColorScheme {
             onTertiaryFixedVariant = tertiary(0.35f)
         )
     }
+}
+
+
+/** The same color at [saturation] (0..1), lightness and alpha untouched. */
+internal fun Color.withSaturation(saturation: Float): Color {
+    val (h, _, l) = toHsl()
+    return Color.fromHsl(h, saturation.coerceIn(0f, 1f), l).copy(alpha = alpha)
+}
+
+
+/** The same color on [hue] (0..1), saturation and lightness untouched. */
+internal fun Color.withHue(hue: Float): Color {
+    val (_, s, l) = toHsl()
+    val wrapped = ((hue % 1f) + 1f) % 1f
+    return Color.fromHsl(wrapped, s, l).copy(alpha = alpha)
 }
 
 

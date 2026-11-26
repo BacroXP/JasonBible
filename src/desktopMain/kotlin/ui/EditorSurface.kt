@@ -13,21 +13,31 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.ContextMenuState
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.LocalTextContextMenu
+import androidx.compose.foundation.text.TextContextMenu
+import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuDropdownProvider
+import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropTarget
@@ -52,6 +62,7 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
@@ -71,6 +82,41 @@ private data class ReferenceMenuState(
     val hit: ReferenceHit,
     val offset: DpOffset
 )
+
+// Right-click on plain text: the menu anchor plus whether the current
+// selection is non-empty (Cut / Copy enabled state).
+private data class TextMenuState(
+    val offset: DpOffset,
+    val hasSelection: Boolean
+)
+
+
+/**
+ * Suppresses Compose's built-in text context menu (Cut / Copy / Paste /
+ * Select all) inside the editor. The editor draws its own right-click
+ * menu with those items plus "Insert Bible reference"; without this the
+ * default menu opened underneath the custom one.
+ *
+ * Both the legacy [TextContextMenu] wrapper and the newer provider-based
+ * menu are stubbed out so whichever path the running Compose version
+ * takes stays silent.
+ */
+private object NoTextContextMenu : TextContextMenu {
+    @Composable
+    override fun Area(
+        textManager: TextContextMenu.TextManager,
+        state: ContextMenuState,
+        content: @Composable () -> Unit
+    ) {
+        content()
+    }
+}
+
+
+/** Shows nothing: suppresses the newer provider-based text context menu. */
+private object NoTextContextMenuProvider : TextContextMenuProvider {
+    override suspend fun showTextContextMenu(dataProvider: TextContextMenuDataProvider) = Unit
+}
 
 
 @Composable
@@ -126,6 +172,15 @@ internal fun EditorSurface(
      */
     onWordSelect: (start: Int, end: Int) -> Unit = { _, _ -> },
     onShortcut: (KeyEvent) -> Boolean,
+    /** Editor right-click: cut / copy / paste / select-all. */
+    onCutSelection: () -> Unit = {},
+    onCopySelection: () -> Unit = {},
+    onPasteClipboard: () -> Unit = {},
+    onSelectAllText: () -> Unit = {},
+    /** Editor right-click: open the Insert-reference picker. */
+    onInsertReference: () -> Unit = {},
+    /** Right-click on a reference chip: open the card export dialog. */
+    onExportReference: (ReferenceMatch) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Build a memoised reference index once per text edit (O(N)) instead of
@@ -157,8 +212,16 @@ internal fun EditorSurface(
     // while the menu is open; opened from a secondary-button press in
     // the pointer handler below.
     var referenceMenu by remember { mutableStateOf<ReferenceMenuState?>(null) }
+    // Live value for the pointer handlers: `pointerInput` outlives
+    // recompositions, so its captured `value` can hold a stale selection.
+    val liveValue by rememberUpdatedState(value)
+    // Right-click on ordinary text: Cut / Copy / Paste / Insert reference.
+    var textMenu by remember { mutableStateOf<TextMenuState?>(null) }
     // Editing the text invalidates any open menu's reference — close it.
-    LaunchedEffect(value.text) { referenceMenu = null }
+    LaunchedEffect(value.text) {
+        referenceMenu = null
+        textMenu = null
+    }
     val clipboard = LocalClipboard.current
     // Clipboard writes are async (suspend) in the new Compose API.
     val clipboardScope = rememberCoroutineScope()
@@ -194,7 +257,13 @@ internal fun EditorSurface(
         val hit = resolveReferenceAt(pos)
         hoveredReference = hit
         val selection = (hit as? ReferenceHit.Bible)?.let {
-            BibleReferenceSelection(it.match.book, it.match.chapter, it.match.verse)
+            BibleReferenceSelection(
+                book = it.match.book,
+                chapter = it.match.chapter,
+                verse = it.match.verse,
+                endChapter = it.match.endChapter,
+                endVerse = it.match.endVerse
+            )
         }
         onHoverBibleReference(selection)
         onHoverBibleReferenceAt(selection, editorWindowPos + pos)
@@ -280,21 +349,61 @@ internal fun EditorSurface(
                                     val change = event.changes.firstOrNull()
                                     if (change != null && event.buttons.isSecondaryPressed) {
                                         val hit = resolveReferenceAt(change.position)
+                                        val anchor = with(density) {
+                                            DpOffset(
+                                                change.position.x.toDp(),
+                                                change.position.y.toDp()
+                                            )
+                                        }
                                         if (hit != null) {
                                             change.consume()
+                                            textMenu = null
                                             referenceMenu = ReferenceMenuState(
                                                 hit = hit,
-                                                offset = with(density) {
-                                                    DpOffset(
-                                                        change.position.x.toDp(),
-                                                        change.position.y.toDp()
-                                                    )
-                                                }
+                                                offset = anchor
                                             )
                                         } else {
-                                            // Right-click on plain text:
-                                            // close any open menu.
+                                            // Right-click on plain text: keep
+                                            // an existing selection when the
+                                            // click lands inside it, otherwise
+                                            // move the caret here so Paste
+                                            // inserts at the pointer.
+                                            val layout = layoutResult
+                                            val displayed = layout
+                                                ?.getOffsetForPosition(change.position)
+                                                ?: -1
+                                            val mapping = (visualTransformation as?
+                                                NoteVisualTransformation)?.offsetMapping
+                                            val source = if (displayed >= 0) {
+                                                mapping?.transformedToOriginal(displayed)
+                                                    ?: displayed
+                                            } else {
+                                                -1
+                                            }
+                                            val current = liveValue
+                                            val sel = current.selection
+                                            val insideSelection = !sel.collapsed &&
+                                                source >= minOf(sel.start, sel.end) &&
+                                                source <= maxOf(sel.start, sel.end)
+                                            if (source >= 0 && !insideSelection) {
+                                                change.consume()
+                                                onValueChange(
+                                                    current.copy(
+                                                        selection = TextRange(
+                                                            source.coerceIn(
+                                                                0,
+                                                                current.text.length
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                            }
                                             referenceMenu = null
+                                            textMenu = TextMenuState(
+                                                offset = anchor,
+                                                hasSelection = insideSelection ||
+                                                    (!sel.collapsed && source < 0)
+                                            )
                                         }
                                     }
                                 }
@@ -321,6 +430,11 @@ internal fun EditorSurface(
                     target = dropTarget
                 )
         ) {
+            CompositionLocalProvider(
+                LocalTextContextMenu provides NoTextContextMenu,
+                LocalTextContextMenuDropdownProvider provides NoTextContextMenuProvider,
+                LocalTextContextMenuToolbarProvider provides NoTextContextMenuProvider
+            ) {
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -438,6 +552,7 @@ internal fun EditorSurface(
                     inner()
                 }
             )
+            }
 
             // Right-click context menu for Bible-reference chips. Anchored
             // at the secondary-button press position; both actions close
@@ -467,6 +582,18 @@ internal fun EditorSurface(
                                         clipboard.setClipEntry(plainTextClipEntry(hit.match.displayText()))
                                     }
                                     referenceMenu = null
+                                }
+                            )
+                            HorizontalDivider()
+                            // One entry: the export dialog offers both the
+                            // postcard PNG and the PowerPoint deck (plus
+                            // the five card designs).
+                            DropdownMenuItem(
+                                text = { Text("Export as postcard / PowerPoint…") },
+                                onClick = {
+                                    SoundManager.play(SoundEvent.Click)
+                                    referenceMenu = null
+                                    onExportReference(hit.match)
                                 }
                             )
                         }
@@ -509,13 +636,72 @@ internal fun EditorSurface(
                                     referenceMenu = null
                                 }
                             )
-                        }
+                                                }
                     }
+                }
+            }
+
+            // Right-click on plain text: the Word-style edit menu (Cut /
+            // Copy / Paste / Select all) plus "Insert Bible reference…".
+            textMenu?.let { menu ->
+                DropdownMenu(
+                    expanded = true,
+                    offset = menu.offset,
+                    onDismissRequest = { textMenu = null }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Cut") },
+                        enabled = menu.hasSelection,
+                        onClick = {
+                            SoundManager.play(SoundEvent.Click)
+                            textMenu = null
+                            onCutSelection()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Copy") },
+                        enabled = menu.hasSelection,
+                        onClick = {
+                            SoundManager.play(SoundEvent.Click)
+                            textMenu = null
+                            onCopySelection()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Paste") },
+                        onClick = {
+                            SoundManager.play(SoundEvent.Click)
+                            textMenu = null
+                            onPasteClipboard()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Select all") },
+                        onClick = {
+                            SoundManager.play(SoundEvent.Click)
+                            textMenu = null
+                            onSelectAllText()
+                        }
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Insert Bible reference…") },
+                        onClick = {
+                            SoundManager.play(SoundEvent.Click)
+                            textMenu = null
+                            onInsertReference()
+                        }
+                    )
                 }
             }
         }
     }
 }
+
+
+
+
+
 
 
 

@@ -13,7 +13,7 @@
   hero.id = 'top';
 
   /* The site link is only useful when the page is not the site itself. */
-  const siteLink = $('.site-link');
+  const siteLink = $('#live-site');
   if (siteLink) {
     const target = siteLink.querySelector('a');
     if (target && target.host === window.location.host) siteLink.remove();

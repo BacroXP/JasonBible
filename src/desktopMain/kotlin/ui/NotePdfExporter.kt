@@ -2,6 +2,7 @@
 
 package ui
 
+import androidx.compose.ui.graphics.Color
 import data.findMediaReferenceTokens
 import data.findNoteLinkTokens
 import data.findReferenceTokens
@@ -29,10 +30,11 @@ import java.nio.file.Paths
  *     The body is parsed with the SAME markup grammar the editor's
  *     visual transformation uses, so the page looks like the editor:
  *     `#`/`###` become real headings, `**bold**` / `*italic*` /
- *     `__underline__` become styled runs, `- ` becomes a `•` bullet,
+  * `__underline__` become styled runs, `- ` becomes a `•` bullet,
  *     quoted and coloured lines keep their look, and the editor-only
  *     markers (`#`, `*`, `$`, `>`, alignment control chars) never reach
- *     the page. PDFBox's standard fonts are WinAnsi-encoded, so any
+ *     the page. Reference / media chips keep the editor's chip colour
+ *     and media links print as their real URL. PDFBox's standard fonts are WinAnsi-encoded, so any
  *     character outside WinAnsi degrades to `?` instead of failing the
  *     export.
  *  3. Word-wrap to page width and auto-paginate when the page fills up.
@@ -45,7 +47,14 @@ import java.nio.file.Paths
  */
 object NotePdfExporter {
 
-    fun exportAsPdf(note: ParsedNote, sourceContent: String): Path? {
+    fun exportAsPdf(
+        note: ParsedNote,
+        sourceContent: String,
+        /** The editor's `primary` — reference / media chips print in it. */
+        primaryColor: Color = colorFromHexInternal(CITE_BLUE_HEX),
+        /** The editor's `tertiary` — `[[note links]]` print in it. */
+        noteLinkColor: Color = primaryColor
+    ): Path? {
         val defaultName = (note.title.ifBlank { note.fileName.removeSuffix(".note") }) + ".pdf"
         val target = promptForPdfPath(defaultName) ?: return null
         return try {
@@ -53,7 +62,11 @@ object NotePdfExporter {
                 target = target,
                 title = note.title.ifBlank { note.fileName.removeSuffix(".note") },
                 subtitle = note.fileName,
-                content = sourceContent
+                content = sourceContent,
+                linkColors = PdfLinkColors(
+                    primary = pdfColorOf(primaryColor),
+                    tertiary = pdfColorOf(noteLinkColor)
+                )
             )
             target
         } catch (t: Throwable) {
@@ -119,7 +132,8 @@ object NotePdfExporter {
         target: Path,
         title: String,
         subtitle: String,
-        content: String
+        content: String,
+        linkColors: PdfLinkColors = DEFAULT_LINK_COLORS
     ) {
         PDDocument().use { doc ->
             val pageSize = PDRectangle.A4
@@ -156,16 +170,23 @@ object NotePdfExporter {
             // runs of them collapse into one fixed gap, and a block that
             // already asks for space above (a heading) never gets it twice.
             var paragraphBreak = false
-            for (block in buildPdfBlocks(bodyWithoutTitle(content))) {
+            // Quotes / citations get a whole blank line of separation from
+            // the surrounding normal text (and vice versa), so a cited
+            // verse never runs straight into the paragraph below it.
+            var previousWasQuote: Boolean? = null
+            for (block in buildPdfBlocks(bodyWithoutTitle(content), linkColors)) {
                 if (block.blank) {
                     paragraphBreak = true
                     continue
                 }
+                val quoteBreak = previousWasQuote != null && previousWasQuote != block.quote
                 val spaceBefore = maxOf(
                     block.spaceBefore,
+                    if (quoteBreak) BODY_LINE_HEIGHT else 0f,
                     if (paragraphBreak) PARAGRAPH_GAP else 0f
                 )
                 paragraphBreak = false
+                previousWasQuote = block.quote
                 flow.gap(spaceBefore)
                 drawBlock(flow, block, margin)
                 flow.gap(block.spaceAfter)
@@ -307,6 +328,16 @@ private const val FOOTER_BASELINE = 30f
 
 private val PDF_MUTED = PdfColor(0.42f, 0.42f, 0.42f)
 
+/** The editor's link-chip colours (primary for references / media,
+ *  tertiary for `[[note links]]`). Defaults match the default accent so
+ *  the chapter export and any non-UI caller still get coloured chips. */
+private data class PdfLinkColors(val primary: PdfColor, val tertiary: PdfColor)
+
+private val DEFAULT_LINK_COLORS = PdfLinkColors(
+    primary = pdfColorOf(colorFromHexInternal(CITE_BLUE_HEX)),
+    tertiary = pdfColorOf(colorFromHexInternal(CITE_BLUE_HEX))
+)
+
 private enum class PdfAlign { LEFT, CENTER, RIGHT }
 
 private data class PdfColor(val r: Float, val g: Float, val b: Float)
@@ -339,6 +370,9 @@ private data class PdfBlock(
     val italic: Boolean = false,
     val indent: Float = 0f,
     val marker: String? = null,
+    /** True for quote chains and coloured citations (blank-line separated
+     *  from normal paragraphs). */
+    val quote: Boolean = false,
     val align: PdfAlign = PdfAlign.LEFT,
     val spaceBefore: Float = 0f,
     val spaceAfter: Float = 0f
@@ -368,9 +402,13 @@ private fun bodyWithoutTitle(content: String): String {
  * grammar as `NoteVisualTransformation`: headings `#`–`######`, quote
  * chains, `- ` bullets, `n. ` numbered list items, `"text"[#hex]`
  * coloured quotes, plus inline `**bold**`, `*italic*`, `__underline__`
- * and reference / media / note-link chips (rendered as plain text).
+ * and reference / media / note-link chips (coloured like the editor;
+ * media tokens print their resolved URL).
  */
-private fun buildPdfBlocks(content: String): List<PdfBlock> {
+private fun buildPdfBlocks(
+    content: String,
+    linkColors: PdfLinkColors = DEFAULT_LINK_COLORS
+): List<PdfBlock> {
     val blocks = mutableListOf<PdfBlock>()
     var numberedCounter = 0
 
@@ -402,8 +440,14 @@ private fun buildPdfBlocks(content: String): List<PdfBlock> {
             val inner = colored.groupValues[1]
             val hex = colored.groupValues[2]
             val trailing = colored.groupValues[3].trim()
+            // Same fallback as the editor: an unparsable / missing hex
+            // uses the theme's primary rather than printing black.
             val runs = mutableListOf(
-                PdfRun(inner, italic = true, color = pdfColorFromHex(hex))
+                PdfRun(
+                    inner,
+                    italic = true,
+                    color = pdfColorFromHex(hex) ?: linkColors.primary
+                )
             )
             if (trailing.isNotEmpty()) {
                 // Keep exactly the gap the editor shows: one space when
@@ -411,7 +455,7 @@ private fun buildPdfBlocks(content: String): List<PdfBlock> {
                 val trailingStart = colored.groups[3]?.range?.first ?: line.length
                 val hadGap = trailingStart > 0 && line[trailingStart - 1].isWhitespace()
                 if (hadGap) runs.add(PdfRun(" "))
-                runs.addAll(inlineRuns(readableReferences(trailing)))
+                runs.addAll(readableRuns(trailing, linkColors))
             }
             blocks.add(
                 PdfBlock(
@@ -420,6 +464,7 @@ private fun buildPdfBlocks(content: String): List<PdfBlock> {
                     lineHeight = BODY_LINE_HEIGHT,
                     italic = true,
                     indent = QUOTE_INDENT,
+                    quote = true,
                     align = align,
                     spaceBefore = 2f
                 )
@@ -444,7 +489,7 @@ private fun buildPdfBlocks(content: String): List<PdfBlock> {
             }
             blocks.add(
                 PdfBlock(
-                    runs = inlineRuns(readableReferences(text), bold = true),
+                    runs = readableRuns(text, linkColors, bold = true),
                     fontSize = size,
                     lineHeight = size * 1.3f,
                     bold = true,
@@ -496,10 +541,15 @@ private fun buildPdfBlocks(content: String): List<PdfBlock> {
 
         blocks.add(
             PdfBlock(
-                runs = inlineRuns(readableReferences(line.trim()), italic = quoteDepth > 0),
+                runs = readableRuns(
+                    line.trim(),
+                    linkColors,
+                    italic = quoteDepth > 0
+                ),
                 fontSize = BODY_FONT_SIZE,
                 lineHeight = BODY_LINE_HEIGHT,
                 italic = quoteDepth > 0,
+                quote = quoteDepth > 0,
                 indent = quoteDepth * QUOTE_INDENT + if (marker != null) LIST_INDENT else 0f,
                 marker = marker,
                 align = align,
@@ -589,27 +639,96 @@ private fun parseInline(text: String, style: PdfRunStyle, out: MutableList<PdfRu
 }
 
 
-/**
- * Replaces the editor's link tokens with the text the editor shows:
- * `$Book&C&V` → "Book C:V", `[[Title]]` → Title, `@service:id` → the
- * chip label. This is what keeps `$`, `&`, `[[`, `]]` and `@` off the
- * printed page.
- */
-private fun readableReferences(text: String): String {
-    if (text.isEmpty()) return text
-    var result = text
+/** One link token to print: its source span, display text and colour. */
+private data class PdfLinkSpan(
+    val start: Int,
+    val end: Int,
+    val text: String,
+    val color: PdfColor
+)
 
-    findNoteLinkTokens(result).asReversed().forEach { token ->
-        result = result.replaceRange(token.sourceStart, token.sourceEnd, token.title)
+/**
+ * Splits [text] into runs like [inlineRuns], but turns the editor's link
+ * tokens into the text the editor shows — `$Book&C&V` → "Book C:V",
+ * `[[Title]]` → Title, `@service:id` → its resolved URL — painted with
+ * the editor's chip colours (bold primary / tertiary). This keeps `$`,
+ * `&`, `[[`, `]]` and `@` off the printed page while keeping the links
+ * coloured like they are on screen, and prints the actual media URL so a
+ * printed Spotify / YouTube link stays usable.
+ */
+private fun readableRuns(
+    text: String,
+    linkColors: PdfLinkColors,
+    bold: Boolean = false,
+    italic: Boolean = false,
+    color: PdfColor? = null
+): List<PdfRun> {
+    if (text.isEmpty()) return emptyList()
+    val tokens = mutableListOf<PdfLinkSpan>()
+    findNoteLinkTokens(text).forEach { token ->
+        tokens.add(
+            PdfLinkSpan(
+                token.sourceStart,
+                token.sourceEnd,
+                token.title,
+                linkColors.tertiary
+            )
+        )
     }
-    findMediaReferenceTokens(result).asReversed().forEach { token ->
-        result = result.replaceRange(token.sourceStart, token.sourceEnd, token.chipText())
+    findMediaReferenceTokens(text).forEach { token ->
+        tokens.add(
+            PdfLinkSpan(
+                token.sourceStart,
+                token.sourceEnd,
+                token.pdfLinkText(),
+                linkColors.primary
+            )
+        )
     }
-    findReferenceTokens(result).asReversed().forEach { token ->
-        result = result.replaceRange(token.sourceStart, token.sourceEnd, token.pdfText())
+    findReferenceTokens(text).forEach { token ->
+        tokens.add(
+            PdfLinkSpan(
+                token.sourceStart,
+                token.sourceEnd,
+                token.pdfText(),
+                linkColors.primary
+            )
+        )
     }
-    return result
+    tokens.sortBy { it.start }
+
+    val out = mutableListOf<PdfRun>()
+    var cursor = 0
+    for (token in tokens) {
+        if (token.start < cursor) continue
+        if (token.start > cursor) {
+            out.addAll(inlineRuns(text.substring(cursor, token.start), bold, italic, color))
+        }
+        out.add(
+            PdfRun(
+                text = token.text,
+                // Link chips are bold on screen, so they print bold too.
+                bold = true,
+                italic = italic,
+                color = token.color
+            )
+        )
+        cursor = token.end
+    }
+    if (cursor < text.length) {
+        out.addAll(inlineRuns(text.substring(cursor), bold, italic, color))
+    }
+    return out
 }
+
+
+/**
+ * The text printed for a media token: its resolved, openable URL (so a
+ * `@spotify:track:…` reference becomes a real Spotify link on paper),
+ * falling back to the editor's chip label when the token has no URL.
+ */
+private fun data.MediaReferenceToken.pdfLinkText(): String =
+    resolveUrl() ?: chipText()
 
 /** `Book C:V` (plus a resolved `-E` / `-C2:E` range) without markers. */
 private fun data.ReferenceToken.pdfText(): String = buildString {
@@ -633,11 +752,18 @@ private fun data.ReferenceToken.pdfText(): String = buildString {
 }
 
 
-/** `[#hex]` marker → PDF colour (alpha dropped; null when unparsable). */
+/** Compose colour → PDF colour (alpha dropped). */
+private fun pdfColorOf(color: Color): PdfColor =
+    PdfColor(color.red, color.green, color.blue)
+
+
+/** `[#hex]` marker → PDF colour (alpha dropped; null when unparsable).
+ *  Accepts the same 6/8-digit forms the editor's colour parser does, so
+ *  the page can never disagree with the screen about a quote's colour. */
 private fun pdfColorFromHex(hex: String): PdfColor? {
-    if (hex.isBlank()) return null
-    val color = colorFromHexInternal(hex)
-    return PdfColor(color.red, color.green, color.blue)
+    val cleaned = hex.removePrefix("#")
+    if (cleaned.length !in listOf(6, 8)) return null
+    return pdfColorOf(colorFromHexInternal(hex))
 }
 
 

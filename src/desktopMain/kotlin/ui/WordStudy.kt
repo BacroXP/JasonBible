@@ -48,6 +48,7 @@ import androidx.compose.ui.window.PopupProperties
 import data.SoundEvent
 import data.SoundManager
 import data.StrongsRepository
+import data.strongsGlossList
 import kotlin.math.roundToInt
 
 
@@ -568,6 +569,17 @@ private fun buildStrongsText(
 
 
 /**
+ * The "can be translated as" alternatives of one Strong's entry: the
+ * comma-separated gloss list the concordance prints after its definition
+ * (`\u2026 : - beginning, chief (-est), first (-fruits) \u2026`).
+ * Parenthetical qualifiers and the `X` marker are dropped so the reader gets
+ * plain alternatives instead of the raw concordance code.
+ */
+internal fun strongsTranslationGlosses(entry: String, max: Int = 5): List<String> =
+    strongsGlossList(entry, max)
+
+
+/**
  * Definition card shown under the verse whose word was clicked: the Strong's
  * number badge and surface word, then the decoded root / transliteration /
  * pronunciation / parsing, then the full definition entry. While the
@@ -663,6 +675,18 @@ internal fun WordStudyPanel(
                 }
 
                 else -> {
+                    // The Strong's gloss list, said in plain words: the
+                    // alternatives this word can carry.
+                    val glosses = remember(definition.entry) {
+                        strongsTranslationGlosses(definition.entry)
+                    }
+                    if (glosses.isNotEmpty()) {
+                        Text(
+                            text = "\u201C${token.word}\u201D can be translated as " +
+                                glosses.joinToString(", ") + ".",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                     if (definition.rootWord.isNotEmpty()) {
                         DefinitionRow(
                             label = "Root",
@@ -719,9 +743,10 @@ internal fun WordStudyPanel(
 
 
 /**
- * Compact, inline word-study card for the whole-book continuous reading
- * view — a lighter alternative to the full [WordStudyPanel] that sits
- * directly under the verse instead of opening a large panel below it.
+ * Compact, inline word-study card — a lighter alternative to the full
+ * [WordStudyPanel] that sits directly under the verse instead of opening a
+ * large panel below it (used by previews such as the reference-insert
+ * dialog).
  * Shows the same decoded data (number badge, word, root / transliteration
  * / pronunciation on one dimmed line, then a truncated definition
  * preview) with a small ✕ close. While the dictionary is still loading it
@@ -819,6 +844,19 @@ internal fun WordStudyMiniPanel(
                 }
 
                 else -> {
+                    // The same "can be translated as" sentence as the full
+                    // panel, trimmed to fit one inline line.
+                    val glosses = remember(definition.entry) {
+                        strongsTranslationGlosses(definition.entry, max = 4)
+                    }
+                    if (glosses.isNotEmpty()) {
+                        Text(
+                            text = "\u201C${token.word}\u201D can be translated as " +
+                                glosses.joinToString(", ") + ".",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                     // Root / transliteration / pronunciation condensed to
                     // one dimmed line so the card stays genuinely inline.
                     val summary = listOfNotNull(
