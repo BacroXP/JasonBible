@@ -119,23 +119,6 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
   hero.append(hint);
 
-  /* Screenshot placeholders (kept out of the pandoc source). */
-  const shotsNote = $('.shots-note');
-  if (shotsNote) {
-    const grid = document.createElement('div');
-    grid.className = 'shot-grid';
-    grid.innerHTML = `
-      <figure class="shot">
-        <div class="shot-art" aria-hidden="true"></div>
-        <figcaption><strong>Home</strong><span>Daily verse &amp; reading plan</span></figcaption>
-      </figure>
-      <figure class="shot">
-        <div class="shot-art" aria-hidden="true"></div>
-        <figcaption><strong>Split view</strong><span>Reader and notes side by side</span></figcaption>
-      </figure>`;
-    shotsNote.after(grid);
-  }
-
   /* Copy buttons for shell snippets. */
   $$('pre').forEach((pre) => {
     const code = pre.querySelector('code');
