@@ -33,11 +33,13 @@ jobs:
           cp docs/readme/style.css site/
           cp docs/readme/script.js site/
           cp docs/readme/icon.png site/
+          mkdir -p site/screenshots
+          cp docs/readme/screenshots/*.png site/screenshots/
 
           cd site
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html style.css script.js icon.png
+          git add index.html style.css script.js icon.png screenshots/
 
           if git diff --cached --quiet; then
             echo "Site is already up to date."
