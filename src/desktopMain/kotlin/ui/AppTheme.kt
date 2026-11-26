@@ -2,9 +2,14 @@ package ui
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import data.DEFAULT_ACCENT_ARGB
 import kotlin.math.max
@@ -67,21 +72,107 @@ internal val ACCENT_SEEDS: List<Long> = listOf(
 
 
 /**
- * The ColorScheme for the active [style], given the current dark-mode
- * flag and (for CUSTOM) the persisted accent seed. NORMAL returns the
- * stock baseline; every other style derives its key roles from a seed
- * via [deriveTonalScheme].
+ * The Pages-site palette: deep navy, leather gold and warm cream. The whole
+ * desktop app uses this scheme so every screen shares the landing page's
+ * visual language; dark mode uses the site's near-black navy, light mode
+ * shifts to the cream paper variant.
+ */
+private val PagesGold = Color(0xFFF2B65A)
+private val PagesGoldSoft = Color(0xFFFFD79A)
+private val PagesInk = Color(0xFF070A10)
+private val PagesNavy = Color(0xFF0B1220)
+private val PagesPanel = Color(0xFF0D1420)
+private val PagesPanel2 = Color(0xFF111A28)
+private val PagesCream = Color(0xFFF5EFE3)
+private val PagesText = Color(0xFFDDD6C8)
+private val PagesMuted = Color(0xFFB3AB9C)
+private val PagesLine = Color(0xFF2A3547)
+
+internal fun pagesScheme(dark: Boolean): ColorScheme = if (dark) {
+    darkColorScheme(
+        primary = PagesGold,
+        onPrimary = PagesNavy,
+        primaryContainer = Color(0xFF3A2B13),
+        onPrimaryContainer = PagesGoldSoft,
+        secondary = PagesGoldSoft,
+        onSecondary = PagesNavy,
+        tertiary = PagesGold,
+        onTertiary = PagesNavy,
+        background = PagesInk,
+        onBackground = PagesCream,
+        surface = PagesPanel,
+        onSurface = PagesCream,
+        surfaceVariant = PagesPanel2,
+        onSurfaceVariant = PagesMuted,
+        surfaceTint = PagesGold,
+        outline = PagesLine,
+        outlineVariant = Color(0xFF1A2332),
+        inverseSurface = PagesCream,
+        inverseOnSurface = PagesNavy,
+        error = Color(0xFFFFB4AB),
+        onError = Color(0xFF690005)
+    )
+} else {
+    lightColorScheme(
+        primary = Color(0xFF8A5A12),
+        onPrimary = Color.White,
+        primaryContainer = PagesGoldSoft,
+        onPrimaryContainer = Color(0xFF2B1A00),
+        secondary = Color(0xFF8A5A12),
+        onSecondary = Color.White,
+        background = PagesCream,
+        onBackground = PagesNavy,
+        surface = Color(0xFFFBF7EF),
+        onSurface = PagesNavy,
+        surfaceVariant = Color(0xFFEDE4D4),
+        onSurfaceVariant = Color(0xFF5D5547),
+        outline = Color(0xFFC9BFAE)
+    )
+}
+
+/** Site-style typography: serif display/headings, sans body copy. */
+internal fun appTypography(): Typography {
+    val base = Typography()
+    fun serif(style: TextStyle) = style.copy(
+        fontFamily = FontFamily.Serif,
+        fontWeight = FontWeight.SemiBold
+    )
+    return Typography(
+        displayLarge = serif(base.displayLarge),
+        displayMedium = serif(base.displayMedium),
+        displaySmall = serif(base.displaySmall),
+        headlineLarge = serif(base.headlineLarge),
+        headlineMedium = serif(base.headlineMedium),
+        headlineSmall = serif(base.headlineSmall),
+        titleLarge = serif(base.titleLarge),
+        titleMedium = serif(base.titleMedium),
+        bodyLarge = base.bodyLarge.copy(fontFamily = FontFamily.SansSerif),
+        bodyMedium = base.bodyMedium.copy(fontFamily = FontFamily.SansSerif),
+        bodySmall = base.bodySmall.copy(fontFamily = FontFamily.SansSerif),
+        labelLarge = base.labelLarge.copy(fontFamily = FontFamily.SansSerif),
+        labelMedium = base.labelMedium.copy(fontFamily = FontFamily.SansSerif),
+        labelSmall = base.labelSmall.copy(fontFamily = FontFamily.SansSerif)
+    )
+}
+
+/** Soft, site-like panel corners for the whole app. */
+internal val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(9.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(24.dp)
+)
+
+/**
+ * Every persisted theme style now resolves to the Pages palette; the dark
+ * toggle still picks the navy or cream variant.
  */
 internal fun appColorScheme(
     dark: Boolean,
     style: AppColorStyle,
     customAccent: Long
-): ColorScheme = when (style) {
-    AppColorStyle.NORMAL -> if (dark) darkColorScheme() else lightColorScheme()
-    AppColorStyle.SATURATED -> deriveTonalScheme(Color(0xFF7C3AEDL), dark)
-    AppColorStyle.GRAY -> deriveTonalScheme(Color(0xFF9E9E9EL), dark)
-    AppColorStyle.CUSTOM -> deriveTonalScheme(Color(saneAccent(customAccent)), dark)
-}
+): ColorScheme = pagesScheme(dark)
 
 
 /** The default seed used when the persisted custom accent is missing /

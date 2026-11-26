@@ -1,9 +1,14 @@
 package ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +39,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -115,6 +121,13 @@ fun HomeScreen(
     var dailyVerse by remember { mutableStateOf<DailyVerse?>(null) }
     var dailyVerseLoaded by remember { mutableStateOf(false) }
     var books by remember { mutableStateOf<List<Book>>(emptyList()) }
+    var revealed by remember { mutableStateOf(false) }
+    val reveal by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = tween(durationMillis = 550),
+        label = "home-reveal"
+    )
+    LaunchedEffect(Unit) { revealed = true }
 
     LaunchedEffect(BibleRepository.currentModuleId(), todaySeed) {
         val loaded = BibleRepository.loadBooks()
@@ -132,7 +145,11 @@ fun HomeScreen(
                 .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 40.dp, vertical = 34.dp),
+                .padding(horizontal = 40.dp, vertical = 34.dp)
+                .graphicsLayer {
+                    alpha = reveal
+                    translationY = (1f - reveal) * 24.dp.toPx()
+                },
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             CrossMark(
@@ -328,14 +345,26 @@ private fun HomeMenuButton(
     val background = if (filled) MenuGold else Color.Transparent
     val contentColor = if (filled) MenuNavy else MenuGold
     val borderColor = if (filled) Color.Transparent else MenuGold.copy(alpha = 0.75f)
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (hovered) 1.012f else 1f,
+        animationSpec = tween(durationMillis = 140),
+        label = "menu-button-scale"
+    )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(58.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(shape)
             .background(background)
             .border(1.dp, borderColor, shape)
+            .hoverable(interaction)
             .clickable {
                 SoundManager.play(SoundEvent.Click)
                 onClick()
@@ -365,6 +394,11 @@ private fun HomeMenuButton(
 
 @Composable
 private fun ProgressRing(percent: Int, label: String, modifier: Modifier = Modifier) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = percent / 100f,
+        animationSpec = tween(durationMillis = 700),
+        label = "progress-ring"
+    )
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -382,11 +416,11 @@ private fun ProgressRing(percent: Int, label: String, modifier: Modifier = Modif
                     useCenter = false,
                     style = Stroke(width = stroke, cap = StrokeCap.Round)
                 )
-                if (percent > 0) {
+                if (animatedProgress > 0f) {
                     drawArc(
                         color = MenuGold,
                         startAngle = -90f,
-                        sweepAngle = 360f * percent / 100f,
+                        sweepAngle = 360f * animatedProgress,
                         useCenter = false,
                         style = Stroke(width = stroke, cap = StrokeCap.Round)
                     )

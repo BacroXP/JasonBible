@@ -99,7 +99,9 @@ fun main() = application {
                 dark = SettingsManager.darkMode,
                 style = ui.AppColorStyle.fromKey(SettingsManager.colorStyle),
                 customAccent = SettingsManager.customAccentColor
-            )
+            ),
+            typography = ui.appTypography(),
+            shapes = ui.AppShapes
         ) {
 
             Surface(
