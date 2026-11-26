@@ -159,7 +159,14 @@ object JsonLoader {
 
 
     private fun open(resourcePath: String): java.io.InputStream? =
-        platform.AppPlatform.openAsset(resourcePath)
+        if (resourcePath.startsWith("download/")) {
+            // Installed on demand from Settings → More translations.
+            TranslationDownloads
+                .fileFor(resourcePath.removePrefix("download/").removeSuffix(".json"))
+                ?.inputStream()
+        } else {
+            platform.AppPlatform.openAsset(resourcePath)
+        }
 
     /**
      * Remove HTML tags (replacing them with a space) and collapse runs of

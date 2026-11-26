@@ -206,10 +206,29 @@ fun settingsSections(): List<SettingsSectionSpec> {
             translationOptions = translationOptions,
             selectedTranslation = selectedTranslation
         ),
+        moreTranslationsSection(),
         notesSection(),
         bibleSection()
     )
 }
+
+
+private fun moreTranslationsSection(): SettingsSectionSpec = SettingsSectionSpec(
+    id = "translation-downloads",
+    title = "More translations",
+    summary = "Download extra Bible modules — they work offline once installed.",
+    keywords = listOf("download", "install", "module", "offline", "extra", "bible", "language"),
+    rows = listOf(
+        SettingRowSpec(
+            id = "translation-downloads.manager",
+            title = "Download translations",
+            description = "The app ships with KJV and the Hebrew WLC. Pick any " +
+                "others here; each is a one-time download and stays on the device.",
+            keywords = listOf("download", "language", "version"),
+            control = SettingControl.Custom { TranslationsManagerSetting() }
+        )
+    )
+)
 
 
 private fun styleSection(): SettingsSectionSpec = SettingsSectionSpec(

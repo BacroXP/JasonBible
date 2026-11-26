@@ -1,0 +1,46 @@
+name: Translations release
+
+# Publishes every module in mobile/translations/ as a release asset, with a
+# manifest.json the app reads to offer them in Settings. These files are far
+# too large to ship inside the APK (884 MB), which is why the app bundles
+# only KJV and the Hebrew WLC and downloads the rest on demand.
+
+on:
+  push:
+    branches: [phone]
+    paths:
+      - "mobile/translations/**"
+      - "mobile/scripts/build_translations_manifest.py"
+      - ".github/workflows/translations-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: translations-release
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build manifest + flat asset copies
+        run: python3 mobile/scripts/build_translations_manifest.py
+
+      - name: Publish to the rolling translations release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: translations-latest
+          name: JasonBible translations (on-demand)
+          prerelease: false
+          make_latest: false
+          files: mobile/translations-dist/*.json
+          body: |
+            Optional Bible modules for the Android app. Settings → Translations
+            lists everything here; the app ships with KJV and the Hebrew WLC.
+
+            `manifest.json` describes every asset (id, language, name, size,
+            sha256, URL). Built from ${{ github.sha }}.

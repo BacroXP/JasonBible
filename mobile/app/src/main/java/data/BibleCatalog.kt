@@ -1,5 +1,9 @@
 package data
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+
 
 
 /**
@@ -30,11 +34,25 @@ object BibleCatalog {
         val resourcePath: String
     )
 
-    val entries: List<BibleEntry> by lazy { discover() }
+    // Rebuilt when a translation is downloaded or removed; the counter is
+    // Compose state so any screen already reading the catalog recomposes.
+    private var cachedEntries: List<BibleEntry>? = null
+    private var catalogVersion by mutableIntStateOf(0)
 
-    val languages: List<String> by lazy {
-        entries.map { it.languageName }.distinct().sorted()
+    val entries: List<BibleEntry>
+        get() {
+            catalogVersion // subscribe to refresh()
+            return cachedEntries ?: discover().also { cachedEntries = it }
+        }
+
+    /** Drops the cache so the next read sees newly installed modules. */
+    fun refresh() {
+        cachedEntries = null
+        catalogVersion++
     }
+
+    val languages: List<String>
+        get() = entries.map { it.languageName }.distinct().sorted()
 
     /**
      * Module used when the saved translation id no longer exists (the
@@ -138,6 +156,20 @@ object BibleCatalog {
                         )
                     )
                 }
+        }
+        // Modules downloaded from Settings → More translations live in
+        // filesDir/translations and behave exactly like bundled ones.
+        TranslationDownloads.installed().forEach { installed ->
+            if (result.any { it.moduleId == installed.id }) return@forEach
+            result.add(
+                BibleEntry(
+                    moduleId = installed.id,
+                    displayName = installed.name.ifBlank { installed.id },
+                    languageName = installed.language.ifBlank { "Downloaded" },
+                    languageFolder = "ZZ-Downloaded",
+                    resourcePath = "download/${installed.id}.json"
+                )
+            )
         }
         return result
             .distinctBy { it.resourcePath }
