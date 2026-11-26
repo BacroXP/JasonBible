@@ -157,6 +157,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      # `gh` shells out to git to resolve the repository, so without a
+      # checkout `gh release create` dies with "fatal: not a git
+      # repository". The full history (fetch-depth: 0) also gives
+      # `--generate-notes` the previous tags it compares against.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v4
         with:
           path: installers

@@ -146,6 +146,7 @@ a failing test blocks the installer builds by design.
 | Workflow ran, but no installers on the release | The tag wasn't pushed to the *remote*, or the push didn't carry the tag — re-check `git ls-remote --tags origin`. |
 | Only the `test` job ran | Branch pushes never build installers — only `v*` **tags** do. |
 | `release` job failed with permission error | The job needs `contents: write` on the repo (already configured in the workflow; verify repo settings don't override it). |
+| `release` job failed with `failed to run git: fatal: not a git repository` | `gh` resolves the repository through git, so the job needs an `actions/checkout` step before the release commands (it is configured now). Re-tag after fixing the workflow, since a tag run uses the workflow file from the tagged commit. |
 | `release` job failed with `Unexpected error fetching GitHub release for tag refs/tags/…: HttpError` | This was `softprops/action-gh-release` re-sending an existing release's `target_commitish` on re-runs, which GitHub refuses for `GITHUB_TOKEN`. The job now uploads assets with `gh release upload --clobber`, so simply re-running the failed job is enough. |
 | MSI/DMG missing | They can only be built on Windows/macOS runners — check the respective job logs for toolchain issues (WiX download, `hdiutil`). |
 | `test` job failed | A unit test is broken — fix and push again before tagging. |
